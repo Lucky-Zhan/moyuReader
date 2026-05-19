@@ -1,0 +1,147 @@
+.reader-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  background: var(--app-bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.reader-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.reader-toolbar-back {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.reader-toolbar-back:hover {
+  background: var(--hover-bg);
+}
+
+.reader-icon-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  width: 34px;
+  height: 30px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reader-icon-btn:hover,
+.reader-icon-btn.active {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.reader-toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+.reader-font-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reader-font-controls label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reader-font-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reader-font-btn:hover {
+  background: var(--hover-bg);
+}
+
+.reader-font-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reader-font-size-display {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 36px;
+  text-align: center;
+}
+
+.reader-font-family-select {
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.reader-font-family-select:hover {
+  border-color: var(--accent);
+}
+
+.reader-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 48px;
+  outline: none;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  background: var(--app-bg);
+  color: var(--text);
+}
+
+.reader-content:focus {
+  outline: none;
+}
+
+.reader-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 16px;
+  background: var(--panel-bg);
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.reader-progress-text {
+  font-weight: 400;
+}

@@ -1,0 +1,191 @@
+.bookshelf {
+  padding: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--app-bg);
+  color: var(--text);
+}
+
+.bookshelf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.bookshelf-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.bookshelf-import-btn {
+  padding: 6px 12px;
+  background: var(--active-bg);
+  color: var(--active-text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.bookshelf-import-btn:hover {
+  background: var(--accent);
+}
+
+/* Empty state */
+.bookshelf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.bookshelf-empty p {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+
+/* Book list */
+.bookshelf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bookshelf-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.bookshelf-item:hover {
+  background: var(--hover-bg);
+}
+
+.bookshelf-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.bookshelf-item-title {
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bookshelf-item-progress {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.bookshelf-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+}
+
+.bookshelf-edit-btn,
+.bookshelf-delete-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.bookshelf-edit-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bookshelf-delete-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Inline edit */
+.bookshelf-edit-input {
+  font-size: 15px;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
+  width: 100%;
+  max-width: 300px;
+  background: var(--panel-bg-strong);
+  color: var(--text);
+}
+
+/* Confirm dialog overlay */
+.bookshelf-confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.bookshelf-confirm-dialog {
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.bookshelf-confirm-dialog p {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+
+.bookshelf-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bookshelf-confirm-cancel,
+.bookshelf-confirm-ok {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.bookshelf-confirm-cancel {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.bookshelf-confirm-cancel:hover {
+  background: var(--hover-bg);
+}
+
+.bookshelf-confirm-ok {
+  background: var(--danger);
+  color: var(--active-text);
+}
+
+.bookshelf-confirm-ok:hover {
+  filter: brightness(0.9);
+}

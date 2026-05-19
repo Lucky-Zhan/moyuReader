@@ -1,0 +1,163 @@
+/* DisguiseTheme styles */
+
+/* Theme selector */
+.disguise-theme-selector {
+  position: relative;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.disguise-theme-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  border-radius: 3px;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.disguise-theme-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.disguise-theme-trigger:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.disguise-theme-menu {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  z-index: 20;
+  min-width: 172px;
+  padding: 6px;
+  background: var(--menu-bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 20px var(--shadow);
+}
+
+.disguise-theme-menu-separator {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+.disguise-theme-menu-label {
+  padding: 4px 8px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.disguise-theme-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  border-radius: 3px;
+}
+
+.disguise-theme-btn:hover,
+.disguise-theme-btn.active {
+  background: var(--active-bg);
+  color: var(--active-text);
+}
+
+.disguise-theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.disguise-theme-toggle:hover {
+  background: var(--hover-bg);
+}
+
+.disguise-theme-toggle input {
+  accent-color: var(--accent);
+}
+
+/* ===== 深色 ===== */
+.theme-dark {
+  --app-bg: #1e1e1e;
+  --panel-bg: #252526;
+  --panel-bg-strong: #181818;
+  --menu-bg: #252526;
+  --text: #d4d4d4;
+  --muted: #858585;
+  --border: #3c3c3c;
+  --hover-bg: #2a2d2e;
+  --active-bg: #094771;
+  --active-text: #ffffff;
+  --accent: #007acc;
+  --danger: #f48771;
+  --shadow: rgba(0, 0, 0, 0.35);
+  background: var(--app-bg);
+  color: var(--text);
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.theme-dark .reader-toolbar {
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.theme-dark .reader-status-bar {
+  background: var(--accent);
+  color: var(--active-text);
+}
+
+/* ===== 浅色 ===== */
+.theme-light {
+  --app-bg: #f7f7f8;
+  --panel-bg: #ffffff;
+  --panel-bg-strong: #f0f1f3;
+  --menu-bg: #ffffff;
+  --text: #202124;
+  --muted: #6f747c;
+  --border: #d9dde3;
+  --hover-bg: #eceff3;
+  --active-bg: #dbeafe;
+  --active-text: #174ea6;
+  --accent: #3b73d9;
+  --danger: #c2410c;
+  --shadow: rgba(15, 23, 42, 0.16);
+  background: var(--app-bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ===== 纸张 ===== */
+.theme-paper {
+  --app-bg: #f5eedf;
+  --panel-bg: #eee2ca;
+  --panel-bg-strong: #eadcc0;
+  --menu-bg: #fbf3e3;
+  --text: #2f261b;
+  --muted: #76664d;
+  --border: #d8c7a8;
+  --hover-bg: #eadfc8;
+  --active-bg: #d9b56f;
+  --active-text: #2f261b;
+  --accent: #9f6b25;
+  --danger: #9a3412;
+  --shadow: rgba(80, 52, 22, 0.18);
+  background: var(--app-bg);
+  color: var(--text);
+  font-family: 'Songti SC', SimSun, serif;
+}
