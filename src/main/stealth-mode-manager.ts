@@ -1,13 +1,16 @@
 import { ipcMain, screen } from 'electron'
-import { IPC_CHANNELS } from '../shared/ipc-channels'
-import type { StealthConfig, ReadingProgress, DisguiseTheme } from '../shared/types'
+import { IPC_CHANNELS, IPC_EVENTS } from '../shared/ipc-channels'
+import type { StealthConfig, DisguiseTheme } from '../shared/types'
+import { DEFAULT_MOUSE_LEAVE_QUIT_DELAY } from '../shared/constants'
+import { assertTrustedIpcSender, type IpcSenderValidator } from './ipc-security'
 
 type LegacyDisguiseTheme = 'code-editor' | 'terminal'
 
 const RETURN_HOT_ZONE_POLL_INTERVAL = 100
 const DEFAULT_MOUSE_LEAVE_DELAY = 200
 const RETURN_HOT_ZONE_MARGIN = 12
-const RETURN_HOT_ZONE_DWELL_TIME = 100
+const RETURN_HOT_ZONE_DWELL_TIME = 2000
+const WINDOW_CURSOR_MARGIN = 1
 
 /** globalShortcut 接口（仅使用到的方法） */
 export interface GlobalShortcutLike {
@@ -19,7 +22,11 @@ export interface GlobalShortcutLike {
 /** BrowserWindow 接口（仅使用到的方法） */
 export interface BrowserWindowLike {
   getBounds(): { x: number; y: number; width: number; height: number }
-  setOpacity(opacity: number): void
+  hide(): void
+  show(): void
+  blur?(): void
+  focus?(): void
+  setAlwaysOnTop?(flag: boolean): void
   setSkipTaskbar(skip: boolean): void
   setTitle(title: string): void
   webContents: {
@@ -37,7 +44,7 @@ export interface SavedReadingState {
  * 隐蔽模式管理器
  *
  * 负责窗口的隐藏/显示逻辑，包括保存和恢复阅读状态。
- * 隐藏时使用 opacity=0 + skipTaskbar=true，确保窗口在 200ms 内不可见。
+ * 隐藏时使用 BrowserWindow.hide()，确保 Windows、macOS 和 Linux 行为一致。
  */
 export class StealthModeManager {
   private window: BrowserWindowLike | null = null
@@ -53,23 +60,36 @@ export class StealthModeManager {
   private returnHotZoneTimer: ReturnType<typeof setInterval> | null = null
   private mouseLeaveTimer: ReturnType<typeof setTimeout> | null = null
   private returnHotZoneEnteredAt: number | null = null
+  private quitApplication: (() => void) | null = null
+  private quitting = false
+  private deferredQuitTimer: ReturnType<typeof setTimeout> | null = null
+  private deferredQuitPending = false
 
   /**
    * 初始化隐蔽模式管理器
    * @param window BrowserWindow 实例
    * @param config 隐蔽模式配置
    */
-  initialize(window: BrowserWindowLike, config: StealthConfig): void {
+  initialize(
+    window: BrowserWindowLike,
+    config: StealthConfig,
+    quitApplication?: () => void
+  ): void {
+    this.cancelMouseLeaveHide()
+    this.stopReturnHotZoneTracking()
+    this.cancelDeferredQuit(false)
     this.window = window
     this.config = config
+    this.quitApplication = quitApplication ?? null
     this.hidden = false
     this.lastState = null
     this.mouseTrackingEnabled = false
+    this.quitting = false
   }
 
   /**
    * 隐藏窗口
-   * 使用 setOpacity(0) + setSkipTaskbar(true) 在 200ms 内隐藏窗口。
+   * 使用 BrowserWindow.hide() + setSkipTaskbar(true) 隐藏窗口。
    * 隐藏前保存当前阅读状态。
    */
   hide(trackReturnHotZone = false): void {
@@ -81,14 +101,13 @@ export class StealthModeManager {
     this.lastState = { ...this.currentReadingState }
     this.hiddenBounds = this.window.getBounds()
 
-    // 设置窗口不可见
-    this.window.setOpacity(0)
     this.window.setSkipTaskbar(true)
+    this.window.hide()
 
     this.hidden = true
 
     // 通知渲染进程
-    this.window.webContents.send('stealth:hidden')
+    this.window.webContents.send(IPC_EVENTS.STEALTH_HIDDEN)
 
     if (trackReturnHotZone) {
       this.startReturnHotZoneTracking()
@@ -97,22 +116,31 @@ export class StealthModeManager {
 
   /**
    * 显示窗口
-   * 恢复 opacity 为 1，setSkipTaskbar 为 false。
+   * 恢复任务栏显示并重新显示窗口。
    */
   show(): void {
-    if (!this.window || !this.hidden) {
+    if (!this.window) {
       return
     }
 
-    // 恢复窗口可见
-    this.window.setOpacity(1)
+    // 原地热区恢复时可能没有 renderer mouseenter，先取消待退出状态。
+    if (this.deferredQuitPending) {
+      this.cancelDeferredQuit(false)
+    }
+
+    if (!this.hidden) {
+      return
+    }
+
     this.window.setSkipTaskbar(false)
+    this.window.show()
+    this.window.focus?.()
 
     this.hidden = false
     this.stopReturnHotZoneTracking()
 
     // 通知渲染进程
-    this.window.webContents.send('stealth:shown')
+    this.window.webContents.send(IPC_EVENTS.STEALTH_SHOWN)
   }
 
   /**
@@ -139,7 +167,7 @@ export class StealthModeManager {
 
   /**
    * 启用鼠标追踪
-   * 启用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息将触发 hide()/show()。
+   * 启用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息将触发配置的行为。
    */
   enableMouseTracking(): void {
     this.mouseTrackingEnabled = true
@@ -147,11 +175,12 @@ export class StealthModeManager {
 
   /**
    * 禁用鼠标追踪
-   * 禁用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息不会触发 hide()/show()。
+   * 禁用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息不会触发隐蔽行为。
    */
   disableMouseTracking(): void {
     this.mouseTrackingEnabled = false
     this.cancelMouseLeaveHide()
+    this.cancelDeferredQuit(true)
     this.stopReturnHotZoneTracking()
   }
 
@@ -164,11 +193,22 @@ export class StealthModeManager {
 
   /**
    * 处理鼠标移出窗口区域事件（由渲染进程通过 IPC 调用）
-   * 当鼠标追踪启用时，触发 hide()。
+   * 当鼠标追踪启用时，按配置隐藏窗口或退出整个应用。
    */
   handleMouseLeave(): void {
-    if (this.mouseTrackingEnabled) {
-      this.scheduleMouseLeaveHide()
+    if (!this.mouseTrackingEnabled || this.quitting) {
+      return
+    }
+
+    switch (this.config?.mouseLeaveAction) {
+      case 'quit':
+        this.quit()
+        return
+      case 'deferred-quit':
+        this.scheduleDeferredQuit()
+        return
+      default:
+        this.scheduleMouseLeaveHide()
     }
   }
 
@@ -177,6 +217,15 @@ export class StealthModeManager {
    * 当鼠标追踪启用时，触发 show()。
    */
   handleMouseEnter(): void {
+    if (this.quitting) {
+      return
+    }
+
+    if (this.deferredQuitPending) {
+      this.cancelDeferredQuit(true)
+      return
+    }
+
     this.cancelMouseLeaveHide()
     if (this.mouseTrackingEnabled) {
       this.show()
@@ -199,11 +248,12 @@ export class StealthModeManager {
       case 'dark':
       case 'light':
       case 'paper':
+      case 'code':
       case 'code-editor':
-        this.window.setTitle('index.ts - moyureader')
+        this.window.setTitle(theme === 'code' || theme === 'code-editor' ? 'reader.ts - workspace' : 'index.ts - moyureader')
         break
       case 'terminal':
-        this.window.setTitle('bash - 80x24')
+        this.window.setTitle('zsh — 120×34')
         break
     }
   }
@@ -218,12 +268,20 @@ export class StealthModeManager {
   /**
    * 注册隐蔽模式相关的 IPC handlers
    */
-  registerIPCHandlers(): void {
-    ipcMain.handle(IPC_CHANNELS.STEALTH_SET_DISGUISE, (_event, theme: DisguiseTheme | LegacyDisguiseTheme) => {
-      this.setDisguise(theme)
-    })
+  registerIPCHandlers(isTrustedSender: IpcSenderValidator): void {
+    ipcMain.handle(
+      IPC_CHANNELS.STEALTH_SET_DISGUISE,
+      (event, theme: unknown) => {
+        assertTrustedIpcSender(event, isTrustedSender)
+        if (!isDisguiseTheme(theme)) {
+          throw new TypeError('Invalid disguise theme')
+        }
+        this.setDisguise(theme)
+      }
+    )
 
-    ipcMain.handle(IPC_CHANNELS.STEALTH_HIDE, () => {
+    ipcMain.handle(IPC_CHANNELS.STEALTH_HIDE, (event) => {
+      assertTrustedIpcSender(event, isTrustedSender)
       this.hide()
     })
   }
@@ -233,19 +291,28 @@ export class StealthModeManager {
    * 快捷键触发时切换隐藏/显示状态（toggle 行为）
    * @param globalShortcut Electron globalShortcut 模块实例
    */
-  registerShortcut(globalShortcut: GlobalShortcutLike): void {
+  registerShortcut(globalShortcut: GlobalShortcutLike): boolean {
     if (!this.config) {
-      return
+      return false
     }
 
+    this.unregisterShortcut()
     this.globalShortcut = globalShortcut
     const accelerator = this.config.hideShortcut
 
-    globalShortcut.register(accelerator, () => {
+    const registered = globalShortcut.register(accelerator, () => {
       this.toggleVisibility()
     })
 
+    if (!registered) {
+      this.window?.webContents.send(IPC_EVENTS.STEALTH_SHORTCUT_FAILED, {
+        accelerator
+      })
+      return false
+    }
+
     this.registeredShortcut = accelerator
+    return true
   }
 
   /**
@@ -288,11 +355,107 @@ export class StealthModeManager {
     timer.unref?.()
   }
 
+  /**
+   * 鼠标离开内容区后先真正隐藏窗口，给用户一个短暂的返回机会，超时后再退出应用。
+   *
+   * 仅 blur/setAlwaysOnTop(false) 在 macOS 上不一定会改变窗口 z-order；这里复用
+   * hide(true) 的原地热区，让窗口可靠离开当前层级，同时仍可通过鼠标回到原位置恢复。
+   */
+  private scheduleDeferredQuit(): void {
+    this.cancelMouseLeaveHide()
+
+    if (!this.window || this.deferredQuitPending) {
+      return
+    }
+
+    // renderer 的 mouseleave 可能在指针移到原生标题栏/窗口边框时触发。
+    // 这类移动仍发生在 BrowserWindow 内，不应启动退出倒计时。
+    if (this.isCursorInsideWindowBounds()) {
+      return
+    }
+
+    this.deferredQuitPending = true
+    this.window.setAlwaysOnTop?.(false)
+    this.window.blur?.()
+    this.hide(true)
+
+    const delay = this.config?.mouseLeaveDelay ?? DEFAULT_MOUSE_LEAVE_QUIT_DELAY
+    if (delay <= 0) {
+      this.quit()
+      return
+    }
+
+    this.deferredQuitTimer = setTimeout(() => {
+      this.deferredQuitTimer = null
+      if (!this.deferredQuitPending) {
+        return
+      }
+
+      // 退出前再次确认指针仍在整个窗口之外。这样即使 renderer 没有收到
+      // mouseenter（例如指针停在原生标题栏），也不会误退出。
+      if (this.isCursorInsideWindowBounds()) {
+        this.cancelDeferredQuit(true)
+        return
+      }
+
+      this.quit()
+    }, delay)
+
+    const quitTimer = this.deferredQuitTimer as { unref?: () => void }
+    quitTimer.unref?.()
+  }
+
+  private cancelDeferredQuit(restoreWindow: boolean): void {
+    if (this.deferredQuitTimer !== null) {
+      clearTimeout(this.deferredQuitTimer)
+      this.deferredQuitTimer = null
+    }
+
+    const shouldRestore = restoreWindow && this.window && this.deferredQuitPending
+    this.deferredQuitPending = false
+
+    if (shouldRestore && this.window) {
+      if (this.hidden) {
+        this.show()
+      } else {
+        this.window.show()
+      }
+      this.window.focus?.()
+    }
+  }
+
+  /** 请求退出整个应用，避免重复触发退出回调。 */
+  private quit(): void {
+    if (this.quitting) {
+      return
+    }
+
+    this.quitting = true
+    this.cancelMouseLeaveHide()
+    this.cancelDeferredQuit(false)
+    this.stopReturnHotZoneTracking()
+    this.quitApplication?.()
+  }
+
   private cancelMouseLeaveHide(): void {
     if (this.mouseLeaveTimer !== null) {
       clearTimeout(this.mouseLeaveTimer)
       this.mouseLeaveTimer = null
     }
+  }
+
+  /** 判断鼠标是否仍在 BrowserWindow（包含原生标题栏）范围内。 */
+  private isCursorInsideWindowBounds(): boolean {
+    if (!this.window) return false
+
+    const point = screen.getCursorScreenPoint()
+    const { x, y, width, height } = this.window.getBounds()
+    return (
+      point.x >= x - WINDOW_CURSOR_MARGIN &&
+      point.x <= x + width + WINDOW_CURSOR_MARGIN &&
+      point.y >= y - WINDOW_CURSOR_MARGIN &&
+      point.y <= y + height + WINDOW_CURSOR_MARGIN
+    )
   }
 
   /**
@@ -351,6 +514,7 @@ export class StealthModeManager {
   destroy(): void {
     this.unregisterShortcut()
     this.cancelMouseLeaveHide()
+    this.cancelDeferredQuit(false)
     this.stopReturnHotZoneTracking()
     this.window = null
     this.config = null
@@ -361,5 +525,11 @@ export class StealthModeManager {
     this.mouseTrackingEnabled = false
     this.currentDisguise = null
     this.globalShortcut = null
+    this.quitApplication = null
+    this.quitting = false
   }
+}
+
+function isDisguiseTheme(value: unknown): value is DisguiseTheme {
+  return value === 'dark' || value === 'light' || value === 'paper' || value === 'code' || value === 'terminal'
 }

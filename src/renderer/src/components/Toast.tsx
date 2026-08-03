@@ -42,14 +42,26 @@ export default function Toast(): JSX.Element | null {
     return () => clearTimeout(timer)
   }, [message])
 
-  // 监听 autosave:failed IPC 事件
+  // 监听主进程通知
   useEffect(() => {
     const handleAutosaveFailed = (): void => {
       showToast('保存失败，将在 30 秒后重试')
     }
-    window.api.on('autosave:failed', handleAutosaveFailed)
+    const handleShortcutRegistrationFailed = ({
+      accelerator
+    }: {
+      accelerator: string
+    }): void => {
+      showToast(`快捷键 ${accelerator} 注册失败，可能已被其他应用占用`)
+    }
+
+    const unsubscribeAutosave = window.api.events.onAutosaveFailed(handleAutosaveFailed)
+    const unsubscribeShortcut =
+      window.api.events.onShortcutRegistrationFailed(handleShortcutRegistrationFailed)
+
     return () => {
-      window.api.removeAllListeners('autosave:failed')
+      unsubscribeAutosave()
+      unsubscribeShortcut()
     }
   }, [])
 

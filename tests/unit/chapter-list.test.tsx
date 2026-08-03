@@ -98,4 +98,69 @@ describe('ChapterList', () => {
     const inactiveItem = screen.getByText('第一章 开始').closest('button')!
     expect(inactiveItem.getAttribute('aria-current')).toBeNull()
   })
+
+  it('renders volume headers without changing chapter indexes', () => {
+    const chaptersWithVolumes: Chapter[] = [
+      { title: '1、开始', offset: 0, length: 10, volumeIndex: 1, volumeTitle: '初识' },
+      { title: '2、继续', offset: 10, length: 10, volumeIndex: 1, volumeTitle: '初识' },
+      { title: '3、转折', offset: 20, length: 10, volumeIndex: 2, volumeTitle: '风起' }
+    ]
+
+    const onSelectChapter = vi.fn()
+    render(
+      <ChapterList
+        chapters={chaptersWithVolumes}
+        currentChapterIndex={2}
+        onSelectChapter={onSelectChapter}
+      />
+    )
+
+    expect(screen.getByText('第1卷')).toBeTruthy()
+    expect(screen.getByText('初识')).toBeTruthy()
+    expect(screen.getByText('第2卷')).toBeTruthy()
+    expect(screen.getByText('3、转折').closest('button')?.className).toContain('nested')
+
+    fireEvent.click(screen.getByText('2、继续'))
+    expect(onSelectChapter).toHaveBeenCalledWith(1)
+  })
+
+  it('virtualizes very large chapter lists around the active chapter', async () => {
+    const manyChapters: Chapter[] = Array.from({ length: 500 }, (_, index) => ({
+      title: `第${index + 1}章`,
+      offset: index * 1000,
+      length: 1000
+    }))
+
+    render(
+      <ChapterList
+        chapters={manyChapters}
+        currentChapterIndex={250}
+        onSelectChapter={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByText('第251章')).toBeTruthy()
+    expect(screen.queryByText('第1章')).toBeNull()
+    expect(screen.queryAllByRole('listitem').length).toBeLessThan(80)
+  })
+
+  it('keeps original indexes when clicking a virtualized chapter', async () => {
+    const manyChapters: Chapter[] = Array.from({ length: 500 }, (_, index) => ({
+      title: `第${index + 1}章`,
+      offset: index * 1000,
+      length: 1000
+    }))
+    const onSelectChapter = vi.fn()
+
+    render(
+      <ChapterList
+        chapters={manyChapters}
+        currentChapterIndex={250}
+        onSelectChapter={onSelectChapter}
+      />
+    )
+
+    fireEvent.click(await screen.findByText('第251章'))
+    expect(onSelectChapter).toHaveBeenCalledWith(250)
+  })
 })

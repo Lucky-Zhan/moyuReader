@@ -1,21 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import Toast, { showToast } from '../../src/renderer/src/components/Toast'
 import { useImportHandler } from '../../src/renderer/src/components/ImportHandler'
+import type { MoyuApi } from '../../src/shared/moyu-api'
+import { createMockApi } from './mock-api'
 
-// Mock window.api
-const mockInvoke = vi.fn()
-const mockOn = vi.fn()
-const mockRemoveAllListeners = vi.fn()
+let api: MoyuApi
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
-  ;(window as unknown as { api: typeof window.api }).api = {
-    invoke: mockInvoke,
-    on: mockOn,
-    removeAllListeners: mockRemoveAllListeners
-  }
+  api = createMockApi()
+  window.api = api
 })
 
 afterEach(() => {
@@ -23,7 +19,7 @@ afterEach(() => {
 })
 
 describe('Toast', () => {
-  it('shows message when showToast is called', async () => {
+  it('shows message when showToast is called', () => {
     render(<Toast />)
 
     act(() => {
@@ -33,7 +29,7 @@ describe('Toast', () => {
     expect(screen.getByText('测试消息')).toBeTruthy()
   })
 
-  it('auto-dismisses after 3 seconds', async () => {
+  it('auto-dismisses after 3 seconds', () => {
     render(<Toast />)
 
     act(() => {
@@ -59,31 +55,53 @@ describe('Toast', () => {
     expect(screen.getByRole('alert')).toBeTruthy()
   })
 
-  it('listens for autosave:failed IPC event', () => {
+  it('listens for autosave failure events', () => {
     render(<Toast />)
 
-    expect(mockOn).toHaveBeenCalledWith('autosave:failed', expect.any(Function))
+    expect(api.events.onAutosaveFailed).toHaveBeenCalledWith(expect.any(Function))
   })
 
-  it('shows toast when autosave:failed event fires', () => {
+  it('shows toast when autosave failure event fires', () => {
     render(<Toast />)
 
-    // Get the callback registered with window.api.on
-    const callback = mockOn.mock.calls.find((call) => call[0] === 'autosave:failed')?.[1]
+    const callback = vi.mocked(api.events.onAutosaveFailed).mock.calls[0]?.[0]
     expect(callback).toBeDefined()
 
     act(() => {
-      callback!()
+      callback!({ message: '保存失败' })
     })
 
     expect(screen.getByText('保存失败，将在 30 秒后重试')).toBeTruthy()
   })
 
-  it('cleans up autosave:failed listener on unmount', () => {
+  it('shows toast when global shortcut registration fails', () => {
+    render(<Toast />)
+
+    const callback = vi.mocked(api.events.onShortcutRegistrationFailed).mock.calls[0]?.[0]
+    expect(callback).toBeDefined()
+
+    act(() => {
+      callback!({ accelerator: 'CommandOrControl+Shift+H' })
+    })
+
+    expect(
+      screen.getByText(
+        '快捷键 CommandOrControl+Shift+H 注册失败，可能已被其他应用占用'
+      )
+    ).toBeTruthy()
+  })
+
+  it('cleans up only its own event listeners on unmount', () => {
+    const unsubscribeAutosave = vi.fn()
+    const unsubscribeShortcut = vi.fn()
+    api.events.onAutosaveFailed = vi.fn(() => unsubscribeAutosave)
+    api.events.onShortcutRegistrationFailed = vi.fn(() => unsubscribeShortcut)
+
     const { unmount } = render(<Toast />)
     unmount()
 
-    expect(mockRemoveAllListeners).toHaveBeenCalledWith('autosave:failed')
+    expect(unsubscribeAutosave).toHaveBeenCalledOnce()
+    expect(unsubscribeShortcut).toHaveBeenCalledOnce()
   })
 })
 
@@ -98,10 +116,10 @@ function ImportTestComponent(): JSX.Element {
 
 describe('useImportHandler', () => {
   it('shows INVALID_FORMAT error toast', async () => {
-    mockInvoke.mockResolvedValueOnce({
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([{
       success: false,
       error: { code: 'INVALID_FORMAT', message: 'Invalid format' }
-    })
+    }])
 
     render(
       <>
@@ -118,10 +136,10 @@ describe('useImportHandler', () => {
   })
 
   it('shows EMPTY_FILE error toast', async () => {
-    mockInvoke.mockResolvedValueOnce({
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([{
       success: false,
       error: { code: 'EMPTY_FILE', message: 'Empty file' }
-    })
+    }])
 
     render(
       <>
@@ -138,10 +156,10 @@ describe('useImportHandler', () => {
   })
 
   it('shows UNSUPPORTED_ENCODING error toast', async () => {
-    mockInvoke.mockResolvedValueOnce({
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([{
       success: false,
       error: { code: 'UNSUPPORTED_ENCODING', message: 'Unsupported encoding' }
-    })
+    }])
 
     render(
       <>
@@ -158,10 +176,10 @@ describe('useImportHandler', () => {
   })
 
   it('shows FILE_TOO_LARGE error toast', async () => {
-    mockInvoke.mockResolvedValueOnce({
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([{
       success: false,
       error: { code: 'FILE_TOO_LARGE', message: 'File too large' }
-    })
+    }])
 
     render(
       <>
@@ -178,7 +196,7 @@ describe('useImportHandler', () => {
   })
 
   it('returns true on successful import', async () => {
-    mockInvoke.mockResolvedValueOnce({ success: true })
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([{ success: true }])
 
     let result: boolean | undefined
 
@@ -199,7 +217,7 @@ describe('useImportHandler', () => {
   })
 
   it('returns false when user cancels file dialog', async () => {
-    mockInvoke.mockResolvedValueOnce(null)
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([])
 
     let result: boolean | undefined
 

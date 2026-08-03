@@ -1,29 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import BookshelfView from '../../src/renderer/src/components/BookshelfView'
+import type { MoyuApi } from '../../src/shared/moyu-api'
+import type { BookMeta } from '../../src/shared/types'
+import { createMockApi } from './mock-api'
 
-// Mock window.api
-const mockInvoke = vi.fn()
+let api: MoyuApi
 
 beforeEach(() => {
   vi.clearAllMocks()
-  ;(window as unknown as { api: { invoke: typeof mockInvoke } }).api = {
-    invoke: mockInvoke
-  }
+  api = createMockApi()
+  window.api = api
 })
 
+function createBook(id: string, title: string, fileSize = 100): BookMeta {
+  return {
+    id,
+    title,
+    filePath: `/tmp/${id}.txt`,
+    fileSize,
+    chapters: [],
+    addedAt: 1,
+    lastReadAt: 1
+  }
+}
+
 function mockBookshelfProgress(percentage = 0): void {
-  mockInvoke.mockImplementation((channel: string) => {
-    if (channel === 'bookshelf:getProgress') {
-      return Promise.resolve({ chapterIndex: 0, scrollPosition: 0, percentage })
-    }
-    return Promise.resolve(undefined)
+  vi.mocked(api.bookshelf.getProgress).mockResolvedValue({
+    chapterIndex: 0,
+    scrollPosition: 0,
+    percentage
   })
 }
 
 describe('BookshelfView', () => {
   it('shows empty state when no books', async () => {
-    mockInvoke.mockResolvedValueOnce([])
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -34,9 +46,9 @@ describe('BookshelfView', () => {
 
   it('renders book list with titles and progress', async () => {
     mockBookshelfProgress(37)
-    mockInvoke.mockResolvedValueOnce([
-      { id: '1', title: '测试小说', chapters: [], fileSize: 100 },
-      { id: '2', title: '另一本书', chapters: [], fileSize: 200 }
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+      createBook('1', '测试小说'),
+      createBook('2', '另一本书', 200)
     ])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
@@ -51,9 +63,7 @@ describe('BookshelfView', () => {
   it('truncates long titles to 50 characters with ellipsis', async () => {
     mockBookshelfProgress()
     const longTitle = 'A'.repeat(60)
-    mockInvoke.mockResolvedValueOnce([
-      { id: '1', title: longTitle, chapters: [], fileSize: 100 }
-    ])
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([createBook('1', longTitle)])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -65,8 +75,8 @@ describe('BookshelfView', () => {
 
   it('calls onOpenBook when clicking a book', async () => {
     mockBookshelfProgress()
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '点击测试', chapters: [], fileSize: 100 }
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+      createBook('book-1', '点击测试')
     ])
     const onOpenBook = vi.fn()
 
@@ -82,8 +92,8 @@ describe('BookshelfView', () => {
 
   it('shows delete confirmation dialog', async () => {
     mockBookshelfProgress()
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '删除测试', chapters: [], fileSize: 100 }
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+      createBook('book-1', '删除测试')
     ])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
@@ -96,11 +106,11 @@ describe('BookshelfView', () => {
     expect(screen.getByText('确定要删除这本小说吗？删除后将无法恢复。')).toBeTruthy()
   })
 
-  it('calls bookshelf:remove on confirm delete', async () => {
+  it('calls bookshelf.remove on confirm delete', async () => {
     mockBookshelfProgress()
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '删除确认', chapters: [], fileSize: 100 }
-    ])
+    vi.mocked(api.bookshelf.getAll)
+      .mockResolvedValueOnce([createBook('book-1', '删除确认')])
+      .mockResolvedValueOnce([])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -109,21 +119,17 @@ describe('BookshelfView', () => {
     })
 
     fireEvent.click(screen.getByText('删除'))
-    // After confirm dialog appears, mock the remove call and reload
-    mockInvoke.mockResolvedValueOnce(undefined) // bookshelf:remove
-    mockInvoke.mockResolvedValueOnce([]) // bookshelf:getAll reload
-
     fireEvent.click(screen.getByText('确认删除'))
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('bookshelf:remove', 'book-1')
+      expect(api.bookshelf.remove).toHaveBeenCalledWith('book-1')
     })
   })
 
   it('cancels delete when clicking cancel', async () => {
     mockBookshelfProgress()
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '取消删除', chapters: [], fileSize: 100 }
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+      createBook('book-1', '取消删除')
     ])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
@@ -141,8 +147,8 @@ describe('BookshelfView', () => {
 
   it('enables inline edit on edit button click', async () => {
     mockBookshelfProgress()
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '编辑测试', chapters: [], fileSize: 100 }
+    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+      createBook('book-1', '编辑测试')
     ])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
@@ -160,9 +166,9 @@ describe('BookshelfView', () => {
 
   it('saves edited title on Enter key', async () => {
     mockBookshelfProgress()
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '旧书名', chapters: [], fileSize: 100 }
-    ])
+    vi.mocked(api.bookshelf.getAll)
+      .mockResolvedValueOnce([createBook('book-1', '旧书名')])
+      .mockResolvedValueOnce([createBook('book-1', '新书名')])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -174,21 +180,18 @@ describe('BookshelfView', () => {
 
     const input = screen.getByDisplayValue('旧书名')
     fireEvent.change(input, { target: { value: '新书名' } })
-
-    mockInvoke.mockResolvedValueOnce(undefined) // bookshelf:updateTitle
-    mockInvoke.mockResolvedValueOnce([
-      { id: 'book-1', title: '新书名', chapters: [], fileSize: 100 }
-    ])
-
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('bookshelf:updateTitle', 'book-1', '新书名')
+      expect(api.bookshelf.updateTitle).toHaveBeenCalledWith('book-1', '新书名')
     })
   })
 
-  it('calls file:import when import button is clicked', async () => {
-    mockInvoke.mockResolvedValueOnce([])
+  it('calls file.importMany when import button is clicked', async () => {
+    vi.mocked(api.bookshelf.getAll)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    vi.mocked(api.file.importMany).mockResolvedValueOnce([{ success: true }])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -196,14 +199,33 @@ describe('BookshelfView', () => {
       expect(screen.getByText('书架为空，请导入小说')).toBeTruthy()
     })
 
-    mockInvoke.mockResolvedValueOnce({ success: true }) // file:import
-    mockInvoke.mockResolvedValueOnce([]) // bookshelf:getAll reload
-
     const importButtons = screen.getAllByText('导入小说')
     fireEvent.click(importButtons[0])
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('file:import')
+      expect(api.file.importMany).toHaveBeenCalled()
+    })
+  })
+
+  it('exports and restores backups from the bookshelf header', async () => {
+    vi.mocked(api.bookshelf.getAll)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    vi.mocked(api.backup.export).mockResolvedValueOnce({ success: true })
+    vi.mocked(api.backup.restore).mockResolvedValueOnce({ success: true, importedBooks: 2 })
+
+    render(<BookshelfView onOpenBook={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('书架为空，请导入小说')).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByText('备份'))
+    fireEvent.click(screen.getByText('恢复'))
+
+    await waitFor(() => {
+      expect(api.backup.export).toHaveBeenCalled()
+      expect(api.backup.restore).toHaveBeenCalled()
     })
   })
 })

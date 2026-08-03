@@ -30,16 +30,30 @@ export const DEFAULT_FONT_SIZE = 16;
 /** 默认字体 */
 export const DEFAULT_FONT_FAMILY = 'Consolas, monospace';
 
+/** Renderer 中允许选择并持久化的字体 */
+export const ALLOWED_FONT_FAMILIES = [
+  DEFAULT_FONT_FAMILY,
+  'Monaco, monospace',
+  '"Courier New", monospace',
+  'SimSun, serif',
+  '"Microsoft YaHei", sans-serif',
+  '"Source Code Pro", monospace',
+  'monospace'
+] as const;
+
 /** 默认行间距 */
 export const DEFAULT_LINE_HEIGHT = 1.8;
 
 /** 行间距范围 */
-export const LINE_HEIGHT_MIN = 1.2;
-export const LINE_HEIGHT_MAX = 2.6;
+export const LINE_HEIGHT_MIN = 1.0;
+export const LINE_HEIGHT_MAX = 3.6;
 export const LINE_HEIGHT_STEP = 0.2;
 
 /** 默认隐藏快捷键 */
 export const DEFAULT_HIDE_SHORTCUT = 'CommandOrControl+Shift+H';
+
+/** 鼠标移出后给用户返回窗口的缓冲时间（ms）；延长以降低误触退出风险 */
+export const DEFAULT_MOUSE_LEAVE_QUIT_DELAY = 5000;
 
 /** 自动保存最大连续失败次数 */
 export const MAX_AUTO_SAVE_RETRIES = 3;

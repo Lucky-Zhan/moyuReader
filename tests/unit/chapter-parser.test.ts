@@ -62,6 +62,15 @@ describe('ChapterParser', () => {
   })
 
   describe('数字序号标题匹配', () => {
+    it('应识别中文顿号分隔的章节标题', () => {
+      const content = '1、归零\n正文\n2、亲戚\n更多正文'
+      const chapters = parser.parse(content)
+      expect(chapters).toHaveLength(2)
+      expect(chapters[0].title).toBe('1、归零')
+      expect(chapters[1].title).toBe('2、亲戚')
+      expect(chapters[0].offset).toBe(0)
+    })
+
     it('应识别"N. 标题"格式', () => {
       const content = '1. 引言\n内容\n2. 正文'
       const chapters = parser.parse(content)
@@ -243,6 +252,38 @@ describe('ChapterParser', () => {
       for (let i = 1; i < chapters.length; i++) {
         expect(chapters[i].offset).toBeGreaterThan(chapters[i - 1].offset)
       }
+    })
+  })
+
+  describe('卷归属', () => {
+    it('应识别卷完标记并给真实章节附加卷索引', () => {
+      const content = [
+        '1、第一章',
+        '第一卷正文',
+        '2、第二章（第一卷完）',
+        '第一卷，初识，完。',
+        '3、第三章',
+        '第二卷，风起，完。',
+        '4、第四章'
+      ].join('\n')
+
+      const chapters = parser.parse(content)
+      expect(chapters.map((chapter) => chapter.title)).toEqual([
+        '1、第一章',
+        '2、第二章（第一卷完）',
+        '3、第三章',
+        '4、第四章'
+      ])
+      expect(chapters.map((chapter) => chapter.volumeIndex)).toEqual([1, 1, 2, 3])
+      expect(chapters[0].volumeTitle).toBe('初识')
+      expect(chapters[2].volumeTitle).toBe('风起')
+    })
+
+    it('不应把正文中的“第二十回合”误识别为章节', () => {
+      const content = '1、开始\n第二十回合，李玄抡矛横扫。\n2、结束'
+      const chapters = parser.parse(content)
+      expect(chapters).toHaveLength(2)
+      expect(chapters.map((chapter) => chapter.title)).toEqual(['1、开始', '2、结束'])
     })
   })
 

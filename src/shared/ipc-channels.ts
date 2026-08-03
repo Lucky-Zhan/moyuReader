@@ -5,6 +5,9 @@ export const IPC_CHANNELS = {
   /** 文件导入 */
   FILE_IMPORT: 'file:import',
 
+  /** 批量文件导入 */
+  FILE_IMPORT_MANY: 'file:importMany',
+
   /** 获取所有书籍 */
   BOOKSHELF_GET_ALL: 'bookshelf:getAll',
 
@@ -22,6 +25,30 @@ export const IPC_CHANNELS = {
 
   /** 获取书籍内容 */
   READER_GET_CONTENT: 'reader:getContent',
+
+  /** 打开书籍并返回元数据、进度和当前章节正文 */
+  READER_OPEN: 'reader:open',
+
+  /** 按章节获取正文 */
+  READER_GET_CHAPTER_CONTENT: 'reader:getChapterContent',
+
+  /** 搜索书内正文 */
+  READER_SEARCH: 'reader:search',
+
+  /** 获取书签 */
+  BOOKMARKS_GET: 'bookmarks:get',
+
+  /** 添加书签 */
+  BOOKMARKS_ADD: 'bookmarks:add',
+
+  /** 删除书签 */
+  BOOKMARKS_REMOVE: 'bookmarks:remove',
+
+  /** 导出备份 */
+  BACKUP_EXPORT: 'backup:export',
+
+  /** 从备份恢复 */
+  BACKUP_RESTORE: 'backup:restore',
 
   /** 设置伪装主题 */
   STEALTH_SET_DISGUISE: 'stealth:setDisguise',
@@ -61,6 +88,9 @@ export const IPC_EVENTS = {
 
   /** 窗口已显示 */
   STEALTH_SHOWN: 'stealth:shown',
+
+  /** 全局隐藏快捷键注册失败 */
+  STEALTH_SHORTCUT_FAILED: 'stealth:shortcutFailed',
 
   /** 自动保存失败 */
   AUTOSAVE_FAILED: 'autosave:failed',

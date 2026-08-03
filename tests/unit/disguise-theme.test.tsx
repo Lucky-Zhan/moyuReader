@@ -17,6 +17,8 @@ describe('DisguiseTheme', () => {
     expect(screen.getByText('深色')).toBeDefined()
     expect(screen.getByText('浅色')).toBeDefined()
     expect(screen.getByText('纸张')).toBeDefined()
+    expect(screen.getByText('代码')).toBeDefined()
+    expect(screen.getByText('终端')).toBeDefined()
     expect(screen.getByText('隐身模式')).toBeDefined()
   })
 
@@ -92,5 +94,10 @@ describe('getThemeClassName', () => {
 
   it('returns "theme-paper" for paper theme', () => {
     expect(getThemeClassName('paper')).toBe('theme-paper')
+  })
+
+  it('returns disguise class names for code and terminal themes', () => {
+    expect(getThemeClassName('code')).toBe('theme-code')
+    expect(getThemeClassName('terminal')).toBe('theme-terminal')
   })
 })

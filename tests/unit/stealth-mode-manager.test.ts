@@ -17,14 +17,22 @@ vi.mock('electron', () => ({
 }))
 
 function createMockWindow(): BrowserWindowLike & {
-  opacity: number
+  visible: boolean
+  minimized: boolean
+  blurred: boolean
+  focused: boolean
+  alwaysOnTop: boolean
   skipTaskbar: boolean
   title: string
   sentEvents: Array<{ channel: string; args: unknown[] }>
   bounds: { x: number; y: number; width: number; height: number }
 } {
   const mock = {
-    opacity: 1,
+    visible: true,
+    minimized: false,
+    blurred: false,
+    focused: false,
+    alwaysOnTop: true,
     skipTaskbar: false,
     title: 'MoyuReader',
     bounds: { x: 100, y: 100, width: 900, height: 670 },
@@ -32,8 +40,30 @@ function createMockWindow(): BrowserWindowLike & {
     getBounds() {
       return { ...mock.bounds }
     },
-    setOpacity(opacity: number) {
-      mock.opacity = opacity
+    hide() {
+      mock.visible = false
+    },
+    show() {
+      mock.visible = true
+    },
+    minimize() {
+      mock.minimized = true
+      mock.visible = false
+    },
+    restore() {
+      mock.minimized = false
+      mock.visible = true
+    },
+    blur() {
+      mock.blurred = true
+      mock.focused = false
+    },
+    focus() {
+      mock.focused = true
+      mock.blurred = false
+    },
+    setAlwaysOnTop(flag: boolean) {
+      mock.alwaysOnTop = flag
     },
     setSkipTaskbar(skip: boolean) {
       mock.skipTaskbar = skip
@@ -62,6 +92,7 @@ describe('StealthModeManager', () => {
   let manager: StealthModeManager
   let mockWindow: ReturnType<typeof createMockWindow>
   let config: StealthConfig
+  let quitApplication: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.useRealTimers()
@@ -69,6 +100,7 @@ describe('StealthModeManager', () => {
     manager = new StealthModeManager()
     mockWindow = createMockWindow()
     config = createDefaultConfig()
+    quitApplication = vi.fn()
     manager.initialize(mockWindow, config)
   })
 
@@ -83,9 +115,9 @@ describe('StealthModeManager', () => {
   })
 
   describe('hide()', () => {
-    it('should set window opacity to 0', () => {
+    it('should hide the BrowserWindow', () => {
       manager.hide()
-      expect(mockWindow.opacity).toBe(0)
+      expect(mockWindow.visible).toBe(false)
     })
 
     it('should set skipTaskbar to true', () => {
@@ -130,10 +162,10 @@ describe('StealthModeManager', () => {
   })
 
   describe('show()', () => {
-    it('should restore window opacity to 1', () => {
+    it('should show the BrowserWindow', () => {
       manager.hide()
       manager.show()
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
     })
 
     it('should set skipTaskbar to false', () => {
@@ -298,14 +330,14 @@ describe('StealthModeManager', () => {
       manager.enableMouseTracking()
       manager.handleMouseLeave()
       expect(manager.isHidden()).toBe(true)
-      expect(mockWindow.opacity).toBe(0)
+      expect(mockWindow.visible).toBe(false)
       expect(mockWindow.skipTaskbar).toBe(true)
     })
 
     it('should not call hide() when mouse tracking is disabled', () => {
       manager.handleMouseLeave()
       expect(manager.isHidden()).toBe(false)
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
     })
 
     it('should save reading state before hiding on mouse leave', () => {
@@ -322,6 +354,144 @@ describe('StealthModeManager', () => {
 
       manager.handleMouseLeave()
       expect(mockWindow.sentEvents).toHaveLength(0)
+    })
+
+    it('should quit the whole app when quit mode is enabled', () => {
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'quit'
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      quitManager.handleMouseLeave()
+
+      expect(quitApplication).toHaveBeenCalledOnce()
+      expect(mockWindow.visible).toBe(true)
+      expect(quitManager.isHidden()).toBe(false)
+    })
+
+    it('should only request app quit once for repeated mouse leave events', () => {
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'quit'
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      quitManager.handleMouseLeave()
+      quitManager.handleMouseLeave()
+
+      expect(quitApplication).toHaveBeenCalledOnce()
+    })
+
+    it('should hide the window and quit after the deferred delay', () => {
+      vi.useFakeTimers()
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'deferred-quit',
+        mouseLeaveDelay: 3000
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      quitManager.handleMouseLeave()
+
+      expect(mockWindow.blurred).toBe(true)
+      expect(mockWindow.alwaysOnTop).toBe(false)
+      expect(mockWindow.visible).toBe(false)
+      expect(mockWindow.skipTaskbar).toBe(true)
+      expect(quitManager.isHidden()).toBe(true)
+      expect(quitApplication).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(2999)
+      expect(quitApplication).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(1)
+      expect(quitApplication).toHaveBeenCalledOnce()
+    })
+
+    it('should ignore renderer mouseleave when the cursor is still inside the native window', () => {
+      vi.useFakeTimers()
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'deferred-quit',
+        mouseLeaveDelay: 3000
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      // Simulate moving from the renderer into the native title bar.
+      cursorPoint = { x: 500, y: 105 }
+      quitManager.handleMouseLeave()
+      vi.advanceTimersByTime(3000)
+
+      expect(quitApplication).not.toHaveBeenCalled()
+      expect(mockWindow.blurred).toBe(false)
+      expect(mockWindow.alwaysOnTop).toBe(true)
+    })
+
+    it('should re-check the cursor position before deferred quit', () => {
+      vi.useFakeTimers()
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'deferred-quit',
+        mouseLeaveDelay: 3000
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      cursorPoint = { x: 50, y: 50 }
+      quitManager.handleMouseLeave()
+      expect(mockWindow.blurred).toBe(true)
+      expect(quitManager.isHidden()).toBe(true)
+
+      // The pointer returns to the native window without a renderer mouseenter.
+      cursorPoint = { x: 500, y: 105 }
+      vi.advanceTimersByTime(3000)
+
+      expect(quitApplication).not.toHaveBeenCalled()
+      expect(mockWindow.focused).toBe(true)
+      expect(mockWindow.blurred).toBe(false)
+      expect(mockWindow.visible).toBe(true)
+      expect(quitManager.isHidden()).toBe(false)
+    })
+
+    it('should restore focus and cancel quit when renderer reports mouseenter', () => {
+      vi.useFakeTimers()
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'deferred-quit',
+        mouseLeaveDelay: 3000
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      quitManager.handleMouseLeave()
+      quitManager.handleMouseEnter()
+      vi.advanceTimersByTime(3000)
+
+      expect(quitApplication).not.toHaveBeenCalled()
+      expect(mockWindow.visible).toBe(true)
+      expect(mockWindow.focused).toBe(true)
+      expect(quitManager.isHidden()).toBe(false)
+    })
+
+    it('should not schedule duplicate deferred quit timers for repeated mouseleave events', () => {
+      vi.useFakeTimers()
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'deferred-quit',
+        mouseLeaveDelay: 3000
+      }, quitApplication)
+      quitManager.enableMouseTracking()
+
+      quitManager.handleMouseLeave()
+      quitManager.handleMouseLeave()
+      vi.advanceTimersByTime(3000)
+
+      expect(quitApplication).toHaveBeenCalledOnce()
     })
 
     it('should delay hiding when mouseLeaveDelay is configured', () => {
@@ -358,7 +528,7 @@ describe('StealthModeManager', () => {
       vi.advanceTimersByTime(200)
 
       expect(delayedManager.isHidden()).toBe(false)
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
     })
   })
 
@@ -368,7 +538,7 @@ describe('StealthModeManager', () => {
       manager.hide()
       manager.handleMouseEnter()
       expect(manager.isHidden()).toBe(false)
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
       expect(mockWindow.skipTaskbar).toBe(false)
     })
 
@@ -395,7 +565,7 @@ describe('StealthModeManager', () => {
 
       manager.handleMouseEnter()
       expect(manager.isHidden()).toBe(false)
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
       expect(mockWindow.skipTaskbar).toBe(false)
     })
 
@@ -409,10 +579,10 @@ describe('StealthModeManager', () => {
 
       cursorPoint = { x: 150, y: 150 }
       vi.advanceTimersByTime(100)
-      vi.advanceTimersByTime(100)
+      vi.advanceTimersByTime(2000)
 
       expect(manager.isHidden()).toBe(false)
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
       expect(mockWindow.skipTaskbar).toBe(false)
     })
 
@@ -428,6 +598,9 @@ describe('StealthModeManager', () => {
       vi.advanceTimersByTime(100)
       expect(manager.isHidden()).toBe(true)
 
+      vi.advanceTimersByTime(1900)
+      expect(manager.isHidden()).toBe(true)
+
       vi.advanceTimersByTime(100)
       expect(manager.isHidden()).toBe(false)
     })
@@ -441,7 +614,7 @@ describe('StealthModeManager', () => {
       expect(manager.isHidden()).toBe(true)
 
       cursorPoint = { x: 95, y: 95 }
-      vi.advanceTimersByTime(200)
+      vi.advanceTimersByTime(2100)
 
       expect(manager.isHidden()).toBe(false)
     })
@@ -455,7 +628,7 @@ describe('StealthModeManager', () => {
       vi.advanceTimersByTime(300)
 
       expect(manager.isHidden()).toBe(true)
-      expect(mockWindow.opacity).toBe(0)
+      expect(mockWindow.visible).toBe(false)
     })
 
     it('should not use return hot zone for direct hide calls', () => {
@@ -467,7 +640,7 @@ describe('StealthModeManager', () => {
       vi.advanceTimersByTime(300)
 
       expect(manager.isHidden()).toBe(true)
-      expect(mockWindow.opacity).toBe(0)
+      expect(mockWindow.visible).toBe(false)
     })
   })
 
@@ -510,7 +683,7 @@ describe('StealthModeManager', () => {
       callback()
 
       expect(manager.isHidden()).toBe(true)
-      expect(mockWindow.opacity).toBe(0)
+      expect(mockWindow.visible).toBe(false)
       expect(mockWindow.skipTaskbar).toBe(true)
     })
 
@@ -527,7 +700,7 @@ describe('StealthModeManager', () => {
       callback()
 
       expect(manager.isHidden()).toBe(false)
-      expect(mockWindow.opacity).toBe(1)
+      expect(mockWindow.visible).toBe(true)
       expect(mockWindow.skipTaskbar).toBe(false)
     })
 
@@ -572,6 +745,19 @@ describe('StealthModeManager', () => {
       customManager.registerShortcut(mockShortcut)
 
       expect(mockShortcut.registeredCallbacks.has('CommandOrControl+Shift+X')).toBe(true)
+    })
+
+    it('should report a failed shortcut registration to the renderer', () => {
+      const mockShortcut = createMockGlobalShortcut()
+      mockShortcut.register = vi.fn().mockReturnValue(false)
+
+      const result = manager.registerShortcut(mockShortcut)
+
+      expect(result).toBe(false)
+      expect(mockWindow.sentEvents).toContainEqual({
+        channel: 'stealth:shortcutFailed',
+        args: [{ accelerator: 'CommandOrControl+Shift+H' }]
+      })
     })
   })
 
@@ -622,12 +808,17 @@ describe('StealthModeManager', () => {
   describe('setDisguise()', () => {
     it('should set window title to code-editor theme title', () => {
       manager.setDisguise('code-editor')
-      expect(mockWindow.title).toBe('index.ts - moyureader')
+      expect(mockWindow.title).toBe('reader.ts - workspace')
+    })
+
+    it('should set window title to code theme title', () => {
+      manager.setDisguise('code')
+      expect(mockWindow.title).toBe('reader.ts - workspace')
     })
 
     it('should set window title to terminal theme title', () => {
       manager.setDisguise('terminal')
-      expect(mockWindow.title).toBe('bash - 80x24')
+      expect(mockWindow.title).toBe('zsh — 120×34')
     })
 
     it('should store the current disguise theme', () => {
@@ -639,7 +830,7 @@ describe('StealthModeManager', () => {
       manager.setDisguise('code-editor')
       manager.setDisguise('terminal')
       expect(manager.getCurrentDisguise()).toBe('terminal')
-      expect(mockWindow.title).toBe('bash - 80x24')
+      expect(mockWindow.title).toBe('zsh — 120×34')
     })
 
     it('should not throw if window is not initialized', () => {
@@ -673,27 +864,43 @@ describe('StealthModeManager', () => {
     })
 
     it('should register stealth:setDisguise handler', () => {
-      manager.registerIPCHandlers()
+      manager.registerIPCHandlers(() => true)
       expect(handlers['stealth:setDisguise']).toBeDefined()
     })
 
     it('should register stealth:hide handler', () => {
-      manager.registerIPCHandlers()
+      manager.registerIPCHandlers(() => true)
       expect(handlers['stealth:hide']).toBeDefined()
     })
 
     it('should call setDisguise when stealth:setDisguise handler is invoked', () => {
-      manager.registerIPCHandlers()
-      handlers['stealth:setDisguise']({}, 'terminal')
-      expect(manager.getCurrentDisguise()).toBe('terminal')
-      expect(mockWindow.title).toBe('bash - 80x24')
+      manager.registerIPCHandlers(() => true)
+      handlers['stealth:setDisguise']({}, 'paper')
+      expect(manager.getCurrentDisguise()).toBe('paper')
+      expect(mockWindow.title).toBe('index.ts - moyureader')
     })
 
     it('should call hide when stealth:hide handler is invoked', () => {
-      manager.registerIPCHandlers()
+      manager.registerIPCHandlers(() => true)
       handlers['stealth:hide']({})
       expect(manager.isHidden()).toBe(true)
-      expect(mockWindow.opacity).toBe(0)
+      expect(mockWindow.visible).toBe(false)
+    })
+
+    it('should reject IPC calls from an untrusted sender', () => {
+      manager.registerIPCHandlers(() => false)
+
+      expect(() => handlers['stealth:hide']({})).toThrow('untrusted sender')
+      expect(manager.isHidden()).toBe(false)
+    })
+
+    it('should reject an invalid disguise theme', () => {
+      manager.registerIPCHandlers(() => true)
+
+      expect(() => handlers['stealth:setDisguise']({}, 'neon')).toThrow(
+        'Invalid disguise theme'
+      )
+      expect(manager.getCurrentDisguise()).toBeNull()
     })
   })
 })

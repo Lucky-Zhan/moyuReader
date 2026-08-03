@@ -156,6 +156,19 @@ describe('SettingsManager', () => {
       expect(settings.disguiseTheme).toBe('paper')
     })
 
+    it('should persist code and terminal disguise themes', () => {
+      manager.setDisguiseTheme('code')
+      expect(manager.getSettings().disguiseTheme).toBe('code')
+
+      manager.setDisguiseTheme('terminal')
+      expect(manager.getSettings().disguiseTheme).toBe('terminal')
+    })
+
+    it('should migrate legacy code-editor theme to code', () => {
+      manager.setDisguiseTheme('code-editor')
+      expect(manager.getSettings().disguiseTheme).toBe('code')
+    })
+
     it('should not lose other settings when updating theme', () => {
       mockStore.set('settings', {
         fontSize: 20,
@@ -189,10 +202,10 @@ describe('SettingsManager', () => {
 
     it('should clamp line height to supported range', () => {
       manager.setLineHeight(9)
-      expect(manager.getSettings().lineHeight).toBe(2.6)
+      expect(manager.getSettings().lineHeight).toBe(3.6)
 
       manager.setLineHeight(0.5)
-      expect(manager.getSettings().lineHeight).toBe(1.2)
+      expect(manager.getSettings().lineHeight).toBe(1)
     })
   })
 

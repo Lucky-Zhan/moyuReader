@@ -11,23 +11,33 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 22px;
+  width: 30px;
+  height: 24px;
+  border: 1px solid transparent;
   color: var(--muted);
   cursor: pointer;
   list-style: none;
-  border-radius: 3px;
+  border-radius: 8px;
   font-size: 13px;
   letter-spacing: 0;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
 .disguise-theme-trigger::-webkit-details-marker {
   display: none;
 }
 
-.disguise-theme-trigger:hover {
-  background: var(--hover-bg);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .disguise-theme-trigger:hover,
+  .disguise-theme-selector[open] .disguise-theme-trigger {
+    border-color: var(--border);
+    background: var(--hover-bg);
+    color: var(--text);
+  }
 }
 
 .disguise-theme-menu {
@@ -37,9 +47,12 @@
   z-index: 20;
   min-width: 172px;
   padding: 6px;
-  background: var(--menu-bg);
   border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--menu-bg);
   box-shadow: 0 8px 20px var(--shadow);
+  backdrop-filter: blur(18px) saturate(145%);
+  animation: disguise-menu-in 160ms var(--ease-out) both;
 }
 
 .disguise-theme-menu-separator {
@@ -64,13 +77,24 @@
   cursor: pointer;
   font-size: 12px;
   text-align: left;
-  border-radius: 3px;
+  border-radius: 8px;
+  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
 }
 
-.disguise-theme-btn:hover,
 .disguise-theme-btn.active {
   background: var(--active-bg);
   color: var(--active-text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .disguise-theme-btn:hover,
+  .disguise-theme-toggle:hover {
+    background: var(--hover-bg);
+  }
+
+  .disguise-theme-btn:hover {
+    color: var(--text);
+  }
 }
 
 .disguise-theme-toggle {
@@ -80,16 +104,30 @@
   padding: 7px 8px;
   color: var(--text);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 8px;
   font-size: 12px;
-}
-
-.disguise-theme-toggle:hover {
-  background: var(--hover-bg);
+  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
 }
 
 .disguise-theme-toggle input {
   accent-color: var(--accent);
+}
+
+@keyframes disguise-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disguise-theme-menu {
+    animation: none;
+  }
 }
 
 /* ===== 深色 ===== */
@@ -107,6 +145,10 @@
   --accent: #007acc;
   --danger: #f48771;
   --shadow: rgba(0, 0, 0, 0.35);
+  --accent-soft: rgba(0, 122, 204, 0.28);
+  --focus-ring: rgba(0, 122, 204, 0.3);
+  --ambient-glow: rgba(0, 122, 204, 0.11);
+  --topbar-bg: rgba(37, 37, 38, 0.84);
   background: var(--app-bg);
   color: var(--text);
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
@@ -118,8 +160,8 @@
 }
 
 .theme-dark .reader-status-bar {
-  background: var(--accent);
-  color: var(--active-text);
+  background: color-mix(in srgb, var(--panel-bg) 82%, var(--accent) 18%);
+  color: var(--text);
 }
 
 /* ===== 浅色 ===== */
@@ -137,6 +179,10 @@
   --accent: #3b73d9;
   --danger: #c2410c;
   --shadow: rgba(15, 23, 42, 0.16);
+  --accent-soft: rgba(59, 115, 217, 0.22);
+  --focus-ring: rgba(59, 115, 217, 0.28);
+  --ambient-glow: rgba(59, 115, 217, 0.1);
+  --topbar-bg: rgba(255, 255, 255, 0.84);
   background: var(--app-bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -157,7 +203,122 @@
   --accent: #9f6b25;
   --danger: #9a3412;
   --shadow: rgba(80, 52, 22, 0.18);
+  --accent-soft: rgba(159, 107, 37, 0.22);
+  --focus-ring: rgba(159, 107, 37, 0.3);
+  --ambient-glow: rgba(214, 164, 80, 0.14);
+  --topbar-bg: rgba(238, 226, 202, 0.86);
   background: var(--app-bg);
   color: var(--text);
   font-family: 'Songti SC', SimSun, serif;
+}
+
+/* ===== 代码编辑器伪装 ===== */
+.theme-code {
+  --app-bg: #1e1e1e;
+  --panel-bg: #252526;
+  --panel-bg-strong: #181818;
+  --menu-bg: #252526;
+  --text: #d4d4d4;
+  --muted: #858585;
+  --border: #3c3c3c;
+  --hover-bg: #2a2d2e;
+  --active-bg: #094771;
+  --active-text: #ffffff;
+  --accent: #007acc;
+  --danger: #f48771;
+  --shadow: rgba(0, 0, 0, 0.35);
+  --accent-soft: rgba(0, 122, 204, 0.28);
+  --focus-ring: rgba(0, 122, 204, 0.3);
+  --ambient-glow: rgba(0, 122, 204, 0.08);
+  --topbar-bg: rgba(37, 37, 38, 0.84);
+  background: var(--app-bg);
+  color: var(--text);
+  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+}
+
+.theme-code .app-topbar::before {
+  content: 'EXPLORER  src/main.tsx  package.json';
+  margin-right: auto;
+  color: var(--muted);
+  font: 11px/1 'SF Mono', Consolas, Monaco, monospace;
+}
+
+.theme-code .bookshelf-eyebrow,
+.theme-terminal .bookshelf-eyebrow {
+  font-size: 0;
+  letter-spacing: 0;
+}
+
+.theme-code .bookshelf-eyebrow::after {
+  content: 'WORKSPACE / FILES';
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.theme-code .reader-content {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  color: #d4d4d4;
+  background:
+    linear-gradient(90deg, #252526 0 52px, transparent 52px),
+    var(--app-bg);
+  padding-left: 72px;
+  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+}
+
+.theme-code .reader-content::selection {
+  background: rgba(0, 122, 204, 0.38);
+}
+
+/* ===== 终端伪装 ===== */
+.theme-terminal {
+  --app-bg: #050505;
+  --panel-bg: #0b0b0b;
+  --panel-bg-strong: #000000;
+  --menu-bg: #111111;
+  --text: #33ff66;
+  --muted: #168f34;
+  --border: #145c24;
+  --hover-bg: #0f1f12;
+  --active-bg: #113d1b;
+  --active-text: #d6ffd9;
+  --accent: #33ff66;
+  --danger: #ff5c57;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --accent-soft: rgba(51, 255, 102, 0.18);
+  --focus-ring: rgba(51, 255, 102, 0.25);
+  --ambient-glow: rgba(51, 255, 102, 0.06);
+  --topbar-bg: rgba(11, 11, 11, 0.86);
+  background: var(--app-bg);
+  color: var(--text);
+  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+}
+
+.theme-terminal .app-topbar::before {
+  content: 'chaoranzhan@moyu:~/workspace $ tail -f app.log';
+  margin-right: auto;
+  color: var(--text);
+  font: 11px/1 'SF Mono', Consolas, Monaco, monospace;
+}
+
+.theme-terminal .bookshelf-eyebrow::after {
+  content: '~/workspace';
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.theme-terminal .reader-content {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  background: #050505;
+  color: #33ff66;
+  text-shadow: 0 0 4px rgba(51, 255, 102, 0.28);
+  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+}
+
+.theme-terminal .reader-content::before {
+  content: '$ less current.log\A';
+  color: var(--muted);
 }

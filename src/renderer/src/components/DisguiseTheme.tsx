@@ -17,7 +17,9 @@ export interface DisguiseThemeProps {
 const THEME_OPTIONS: { value: DisguiseThemeType; label: string }[] = [
   { value: 'dark', label: '深色' },
   { value: 'light', label: '浅色' },
-  { value: 'paper', label: '纸张' }
+  { value: 'paper', label: '纸张' },
+  { value: 'code', label: '代码' },
+  { value: 'terminal', label: '终端' }
 ]
 
 /**
@@ -82,6 +84,10 @@ export function getThemeClassName(theme: DisguiseThemeType): string {
       return 'theme-light'
     case 'paper':
       return 'theme-paper'
+    case 'code':
+      return 'theme-code'
+    case 'terminal':
+      return 'theme-terminal'
     default:
       return 'theme-dark'
   }

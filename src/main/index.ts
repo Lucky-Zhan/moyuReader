@@ -1,4 +1,5 @@
 import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
 import { BookshelfManager } from './bookshelf-manager'
@@ -8,16 +9,141 @@ import { ReaderController } from './reader-controller'
 import { SettingsManager } from './settings-manager'
 import { StealthModeManager } from './stealth-mode-manager'
 import { AutoSaveManager } from './auto-save-manager'
-import { registerBookshelfHandlers, registerSettingsHandlers } from './ipc-handlers'
+import {
+  registerBookshelfHandlers,
+  registerSettingsHandlers,
+  registerStealthMouseHandlers
+} from './ipc-handlers'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
-import { DEFAULT_HIDE_SHORTCUT } from '../shared/constants'
+import { DEFAULT_HIDE_SHORTCUT, DEFAULT_MOUSE_LEAVE_QUIT_DELAY } from '../shared/constants'
+import { assertTrustedIpcSender } from './ipc-security'
+import { ensureSingleInstanceLock } from './single-instance'
+import { registerBackupHandlers } from './backup-handlers'
+import type { BookImportResult, ImportResult } from '../shared/types'
+
+interface ApplicationModules {
+  bookshelfManager: BookshelfManager
+  fileImporter: FileImporter
+  chapterParser: ChapterParser
+  settingsManager: SettingsManager
+  stealthModeManager: StealthModeManager
+}
 
 let mainWindow: BrowserWindow | null = null
-let stealthModeManager: StealthModeManager | null = null
+let modules: ApplicationModules | null = null
 let autoSaveManager: AutoSaveManager | null = null
 
+const hasSingleInstanceLock = ensureSingleInstanceLock(app, () => mainWindow)
+
+function isTrustedIpcSender(event: IpcMainInvokeEvent): boolean {
+  return (
+    mainWindow !== null &&
+    !mainWindow.isDestroyed() &&
+    event.sender === mainWindow.webContents
+  )
+}
+
+/**
+ * 应用级模块和 IPC handlers 只初始化一次。
+ * macOS 重建窗口时只重新绑定窗口级资源，避免重复注册 ipcMain.handle。
+ */
+function initializeApplication(): void {
+  if (modules) return
+
+  const store = new Store()
+  const bookshelfManager = new BookshelfManager()
+  const fileImporter = new FileImporter()
+  const chapterParser = new ChapterParser()
+  const settingsManager = new SettingsManager(store)
+  const stealthModeManager = new StealthModeManager()
+
+  // 保留现有阅读控制器初始化；当前 Renderer 仍通过细粒度 IPC 获取阅读数据。
+  new ReaderController(bookshelfManager)
+
+  modules = {
+    bookshelfManager,
+    fileImporter,
+    chapterParser,
+    settingsManager,
+    stealthModeManager
+  }
+
+  ipcMain.handle(IPC_CHANNELS.FILE_IMPORT, async (event) => {
+    assertTrustedIpcSender(event, isTrustedIpcSender)
+
+    const importResult = await fileImporter.importFile()
+    return importBookToShelf(importResult, bookshelfManager, chapterParser)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.FILE_IMPORT_MANY, async (event) => {
+    assertTrustedIpcSender(event, isTrustedIpcSender)
+    const importResults = await fileImporter.importFiles()
+    return importResults.map((importResult) => {
+      try {
+        return importBookToShelf(importResult, bookshelfManager, chapterParser)
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'IMPORT_FAILED',
+            message: error instanceof Error ? error.message : '导入失败'
+          }
+        } satisfies BookImportResult
+      }
+    })
+  })
+
+  registerBookshelfHandlers(bookshelfManager, isTrustedIpcSender)
+  registerBackupHandlers(bookshelfManager, isTrustedIpcSender)
+  stealthModeManager.registerIPCHandlers(isTrustedIpcSender)
+  registerStealthMouseHandlers(stealthModeManager, isTrustedIpcSender)
+  registerSettingsHandlers(
+    settingsManager,
+    isTrustedIpcSender,
+    (enabled) => {
+      if (enabled) {
+        stealthModeManager.enableMouseTracking()
+      } else {
+        stealthModeManager.disableMouseTracking()
+        stealthModeManager.show()
+      }
+    }
+  )
+}
+
+function importBookToShelf(
+  importResult: ImportResult,
+  bookshelfManager: BookshelfManager,
+  chapterParser: ChapterParser
+): BookImportResult {
+  if (!importResult.success || !importResult.book) {
+    return {
+      success: false,
+      error: importResult.error
+    }
+  }
+
+  const chapters = chapterParser.parse(importResult.book.content)
+  try {
+    const bookMeta = bookshelfManager.addBook(importResult.book, chapters)
+    return { success: true, bookMeta }
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: 'IMPORT_FAILED',
+        message: error instanceof Error ? error.message : '导入失败'
+      }
+    }
+  }
+}
+
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
+  if (!modules) {
+    throw new Error('Application modules must be initialized before creating a window')
+  }
+
+  const window = new BrowserWindow({
     width: 900,
     height: 670,
     minWidth: 520,
@@ -33,127 +159,90 @@ function createWindow(): void {
     backgroundColor: '#1e1e1e',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow!.show()
-  })
+  mainWindow = window
+  hardenWindow(window)
 
-  // In development, load from dev server; in production, load from file
-  if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
-}
-
-function initializeModules(): void {
-  if (!mainWindow) return
-
-  // Initialize electron-store
-  const store = new Store()
-
-  // Initialize core modules
-  const bookshelfManager = new BookshelfManager()
-  const fileImporter = new FileImporter()
-  const chapterParser = new ChapterParser()
-  const readerController = new ReaderController(bookshelfManager)
-  const settingsManager = new SettingsManager(store)
-
-  // Initialize stealth mode manager
-  stealthModeManager = new StealthModeManager()
-  const settings = settingsManager.getSettings()
-  stealthModeManager.initialize(mainWindow, {
+  const settings = modules.settingsManager.getSettings()
+  modules.stealthModeManager.initialize(window, {
     hideShortcut: settings.hideShortcut || DEFAULT_HIDE_SHORTCUT,
-    mouseLeaveDelay: 200,
-    hideAnimation: 'opacity'
-  })
-
-  stealthModeManager.setDisguise(settings.disguiseTheme || 'dark')
-
+    mouseLeaveAction: 'deferred-quit',
+    mouseLeaveDelay: DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+    hideAnimation: 'hide'
+  }, () => app.quit())
+  modules.stealthModeManager.setDisguise(settings.disguiseTheme || 'dark')
   if (settings.stealthEnabled) {
-    stealthModeManager.enableMouseTracking()
+    modules.stealthModeManager.enableMouseTracking()
   }
 
-  // Initialize auto-save manager
-  autoSaveManager = new AutoSaveManager(bookshelfManager, mainWindow)
+  autoSaveManager = new AutoSaveManager(modules.bookshelfManager, window)
 
-  // Register IPC handlers
-  // Integrated file:import handler: import → parse chapters → add to bookshelf → return BookMeta
-  ipcMain.handle(IPC_CHANNELS.FILE_IMPORT, async () => {
-    const importResult = await fileImporter.importFile()
-    if (!importResult.success || !importResult.book) {
-      return importResult
-    }
-
-    // Parse chapters from the imported content
-    const chapters = chapterParser.parse(importResult.book.content)
-
-    // Add book to bookshelf with parsed chapters
-    const bookMeta = bookshelfManager.addBook(importResult.book, chapters)
-
-    return { success: true, bookMeta }
+  window.once('ready-to-show', () => {
+    if (window.isDestroyed() || mainWindow !== window) return
+    window.show()
+    modules?.stealthModeManager.registerShortcut(globalShortcut)
   })
 
-  registerBookshelfHandlers(bookshelfManager)
-  stealthModeManager.registerIPCHandlers()
+  window.on('closed', () => {
+    if (mainWindow !== window) return
 
-  registerSettingsHandlers(settingsManager, (enabled) => {
-    if (enabled) {
-      stealthModeManager?.enableMouseTracking()
-    } else {
-      stealthModeManager?.disableMouseTracking()
-      stealthModeManager?.show()
-    }
+    autoSaveManager?.stopAutoSave()
+    autoSaveManager = null
+    modules?.stealthModeManager.destroy()
+    mainWindow = null
   })
 
-  // Register mouse tracking IPC handlers
-  ipcMain.handle(IPC_CHANNELS.STEALTH_MOUSE_LEAVE, () => {
-    stealthModeManager?.handleMouseLeave()
-  })
-
-  ipcMain.handle(IPC_CHANNELS.STEALTH_MOUSE_ENTER, () => {
-    stealthModeManager?.handleMouseEnter()
-  })
-
-  // Register global shortcut for stealth mode
-  const hideShortcut = settings.hideShortcut || DEFAULT_HIDE_SHORTCUT
-  stealthModeManager.registerShortcut(globalShortcut)
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  if (!app.isPackaged && rendererUrl) {
+    void window.loadURL(rendererUrl)
+  } else {
+    void window.loadFile(join(__dirname, '../renderer/index.html'))
+  }
 }
 
-app.whenReady().then(() => {
-  createWindow()
-  initializeModules()
+function hardenWindow(window: BrowserWindow): void {
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-navigate', (event) => {
+    event.preventDefault()
+  })
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-      initializeModules()
+  window.webContents.session.setPermissionCheckHandler(() => false)
+  window.webContents.session.setPermissionRequestHandler(
+    (_webContents, _permission, callback) => {
+      callback(false)
+    }
+  )
+}
+
+if (hasSingleInstanceLock) {
+  app.whenReady().then(() => {
+    initializeApplication()
+    createWindow()
+
+    app.on('activate', () => {
+      if (!mainWindow) {
+        createWindow()
+      }
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
     }
   })
-})
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
-
-app.on('will-quit', () => {
-  // Clean up stealth mode manager (unregister shortcuts)
-  if (stealthModeManager) {
-    stealthModeManager.destroy()
-    stealthModeManager = null
-  }
-
-  // Stop auto-save
-  if (autoSaveManager) {
-    autoSaveManager.stopAutoSave()
+  app.on('will-quit', () => {
+    autoSaveManager?.stopAutoSave()
     autoSaveManager = null
-  }
-
-  // Unregister all global shortcuts
-  globalShortcut.unregisterAll()
-})
+    modules?.stealthModeManager.destroy()
+    globalShortcut.unregisterAll()
+  })
+}

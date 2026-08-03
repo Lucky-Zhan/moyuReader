@@ -6,6 +6,7 @@ import * as iconv from 'iconv-lite'
 import { EncodingType, ImportError, ImportResult, BookData } from '../shared/types'
 import { MAX_FILE_SIZE } from '../shared/constants'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
+import { assertTrustedIpcSender, type IpcSenderValidator } from './ipc-security'
 
 /** GBK 系列编码名称（chardet 可能返回的变体） */
 const GBK_ENCODINGS = ['gb18030', 'gb2312', 'gbk', 'euc-cn', 'chinese']
@@ -182,8 +183,31 @@ export class FileImporter {
       return { success: false }
     }
 
-    const filePath = result.filePaths[0]
+    return this.importSelectedFile(result.filePaths[0])
+  }
 
+  /** 批量导入流程：允许选择多个 txt 文件，并逐个返回导入结果。 */
+  async importFiles(): Promise<ImportResult[]> {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Text Files', extensions: ['txt'] }
+      ]
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return []
+    }
+
+    const imported: ImportResult[] = []
+    for (const filePath of result.filePaths) {
+      imported.push(await this.importSelectedFile(filePath))
+    }
+
+    return imported
+  }
+
+  private async importSelectedFile(filePath: string): Promise<ImportResult> {
     // 获取文件大小
     const stats = await fs.promises.stat(filePath)
     const fileSize = stats.size
@@ -220,8 +244,12 @@ export class FileImporter {
  * 注册文件导入 IPC handler
  * 将 file:import 通道绑定到 FileImporter 实例的 importFile 方法
  */
-export function registerFileImportHandler(fileImporter: FileImporter): void {
-  ipcMain.handle(IPC_CHANNELS.FILE_IMPORT, async () => {
+export function registerFileImportHandler(
+  fileImporter: FileImporter,
+  isTrustedSender: IpcSenderValidator
+): void {
+  ipcMain.handle(IPC_CHANNELS.FILE_IMPORT, async (event) => {
+    assertTrustedIpcSender(event, isTrustedSender)
     return fileImporter.importFile()
   })
 }

@@ -122,7 +122,8 @@ export class SettingsManager {
     theme: DisguiseTheme | LegacyDisguiseTheme | undefined
   ): DisguiseTheme {
     if (theme === 'light' || theme === 'paper' || theme === 'dark') return theme
-    if (theme === 'terminal' || theme === 'code-editor') return 'dark'
+    if (theme === 'terminal' || theme === 'code') return theme
+    if (theme === 'code-editor') return 'code'
     return 'dark'
   }
 }

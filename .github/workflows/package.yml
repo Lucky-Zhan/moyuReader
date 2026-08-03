@@ -1,0 +1,59 @@
+name: Package Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/package.yml"
+      - "build/**"
+      - "electron.vite.config.ts"
+      - "package-lock.json"
+      - "package.json"
+      - "src/**"
+
+jobs:
+  package:
+    name: Package on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+      npm_config_loglevel: warn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unpacked app
+        run: npm run pack
+
+      - name: Verify package artifact
+        run: npm run verify:package
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moyureader-${{ runner.os }}-unpacked
+          path: release/**
+          if-no-files-found: error

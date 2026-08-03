@@ -108,6 +108,41 @@ describe('FileImporter - importFile 完整流程', () => {
     expect(result.success).toBe(true)
     expect(result.book!.fileSize).toBe(expectedSize)
   })
+
+  it('批量选择多个有效 txt 文件应逐个导入', async () => {
+    const firstPath = path.join(tmpDir, '第一本.txt')
+    const secondPath = path.join(tmpDir, '第二本.txt')
+    fs.writeFileSync(firstPath, '第一本内容', 'utf-8')
+    fs.writeFileSync(secondPath, '第二本内容', 'utf-8')
+
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [firstPath, secondPath]
+    })
+
+    const result = await importer.importFiles()
+
+    expect(result).toHaveLength(2)
+    expect(result[0]).toEqual(expect.objectContaining({
+      success: true,
+      book: expect.objectContaining({ fileName: '第一本', content: '第一本内容' })
+    }))
+    expect(result[1]).toEqual(expect.objectContaining({
+      success: true,
+      book: expect.objectContaining({ fileName: '第二本', content: '第二本内容' })
+    }))
+  })
+
+  it('批量导入取消选择时应返回空数组', async () => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: true,
+      filePaths: []
+    })
+
+    const result = await importer.importFiles()
+
+    expect(result).toEqual([])
+  })
 })
 
 describe('registerFileImportHandler - IPC handler 注册', () => {
@@ -117,7 +152,7 @@ describe('registerFileImportHandler - IPC handler 注册', () => {
 
   it('应注册 file:import 通道的 handler', () => {
     const importer = new FileImporter()
-    registerFileImportHandler(importer)
+    registerFileImportHandler(importer, () => true)
 
     expect(ipcMain.handle).toHaveBeenCalledWith('file:import', expect.any(Function))
   })
@@ -127,14 +162,26 @@ describe('registerFileImportHandler - IPC handler 注册', () => {
     const mockImportResult = { success: false }
     vi.spyOn(importer, 'importFile').mockResolvedValue(mockImportResult)
 
-    registerFileImportHandler(importer)
+    registerFileImportHandler(importer, () => true)
 
     // 获取注册的 handler 函数并调用
     const handlerCall = vi.mocked(ipcMain.handle).mock.calls[0]
-    const handler = handlerCall[1] as () => Promise<unknown>
-    const result = await handler()
+    const handler = handlerCall[1] as (event: unknown) => Promise<unknown>
+    const result = await handler({})
 
     expect(importer.importFile).toHaveBeenCalled()
     expect(result).toBe(mockImportResult)
+  })
+
+  it('不可信来源不应打开文件选择器', async () => {
+    const importer = new FileImporter()
+    const importSpy = vi.spyOn(importer, 'importFile')
+    registerFileImportHandler(importer, () => false)
+
+    const handlerCall = vi.mocked(ipcMain.handle).mock.calls[0]
+    const handler = handlerCall[1] as (event: unknown) => Promise<unknown>
+
+    await expect(handler({})).rejects.toThrow('untrusted sender')
+    expect(importSpy).not.toHaveBeenCalled()
   })
 })
