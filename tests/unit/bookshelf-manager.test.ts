@@ -732,6 +732,38 @@ describe('BookshelfManager', () => {
       expect(() => manager.restoreBackup({ version: 2, books: [] } as any))
         .toThrow('Invalid backup file')
     })
+
+    it('should reject a backup whose progress or bookmarks are not objects', () => {
+      // 备份文件可能来自任何地方。progress/bookmarks 若被写成字符串，
+      // 恢复后 getProgress 会读出垃圾数据，阅读位置直接错乱。
+      const meta = {
+        id: 'b1',
+        title: 'T',
+        filePath: '/x',
+        fileSize: 1,
+        chapters: [{ title: 'c', offset: 0, length: 1 }],
+        addedAt: 1,
+        lastReadAt: 1
+      }
+
+      expect(() =>
+        manager.restoreBackup({
+          version: 1,
+          books: [{ meta, content: 'hello' }],
+          progress: 'NOT-AN-OBJECT',
+          bookmarks: {}
+        } as any)
+      ).toThrow('Invalid backup file')
+
+      expect(() =>
+        manager.restoreBackup({
+          version: 1,
+          books: [{ meta, content: 'hello' }],
+          progress: {},
+          bookmarks: 'ALSO-WRONG'
+        } as any)
+      ).toThrow('Invalid backup file')
+    })
   })
 
   describe('updateTitle()', () => {

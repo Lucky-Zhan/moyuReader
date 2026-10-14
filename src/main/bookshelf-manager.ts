@@ -549,6 +549,13 @@ export class BookshelfManager {
       throw new TypeError('Invalid backup file')
     }
 
+    // progress / bookmarks 必须是「以书籍 id 为键」的对象。
+    // 若放任字符串等非对象值通过，恢复后 getProgress 会读出垃圾数据，
+    // 阅读位置直接错乱，且要到用户打开书时才会暴露。
+    if (!isRecord(backup.progress) || !isRecord(backup.bookmarks)) {
+      throw new TypeError('Invalid backup file')
+    }
+
     for (const item of backup.books) {
       if (!item || typeof item !== 'object' || typeof item.content !== 'string') {
         throw new TypeError('Invalid backup file')
@@ -730,6 +737,13 @@ export class BookshelfManager {
     const title = rawLine.trim()
     return title.length > 0 ? title : null
   }
+}
+
+/**
+ * 判断值是否为「普通对象」（排除 null 与数组）。
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
