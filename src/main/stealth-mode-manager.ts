@@ -565,6 +565,15 @@ export class StealthModeManager {
     this.cancelDeferredQuit(false)
     this.stopReturnHotZoneTracking()
 
+    // 退出前通知渲染进程落盘。
+    //
+    // 'deferred-quit' 会先 hide() 再退出，渲染进程能从 stealth:hidden 得知；
+    // 但 'quit' 是直接退出、不经过 hide()，渲染进程完全不知情，它那 250ms
+    // 防抖中的进度就会丢。这里补发一次事件，让两条退出路径行为一致。
+    if (!this.hidden) {
+      this.window?.webContents.send(IPC_EVENTS.STEALTH_HIDDEN)
+    }
+
     // 退出前先落盘：鼠标移出触发的自动退出不会走窗口 closed 流程，
     // 不 flush 会丢掉最后一个保存周期内的阅读进度。
     try {

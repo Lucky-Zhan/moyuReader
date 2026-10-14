@@ -1057,6 +1057,31 @@ describe('StealthModeManager', () => {
       // 收尾失败不能阻止退出，否则窗口会卡在不可见状态。
       expect(quitApplication).toHaveBeenCalledTimes(1)
     })
+
+    it('emits stealth:hidden before quitting so the renderer can flush progress', () => {
+      // 自动退出路径会先 hide() 再 quit()。渲染进程的进度防抖依赖
+      // stealth:hidden 事件落盘，因此该事件必须早于退出发生，
+      // 否则最后一个保存周期内的阅读进度会丢。
+      const beforeQuit = vi.fn()
+      const order: string[] = []
+      manager.setPlatformHooks({
+        beforeQuit: () => {
+          order.push('beforeQuit')
+          beforeQuit()
+        }
+      })
+      manager.initialize(mockWindow, config, () => order.push('quit'))
+      manager.updateMouseLeaveConfig({ mouseLeaveAction: 'quit' })
+      manager.enableMouseTracking()
+      manager.handleMouseLeave()
+
+      const hiddenIndex = mockWindow.sentEvents.findIndex(
+        (event) => event.channel === 'stealth:hidden'
+      )
+      expect(hiddenIndex).toBeGreaterThanOrEqual(0)
+      expect(order).toEqual(['beforeQuit', 'quit'])
+      expect(beforeQuit).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('return hot-zone polling', () => {
