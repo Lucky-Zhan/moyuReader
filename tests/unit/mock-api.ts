@@ -62,3 +62,18 @@ export function createMockApi(): MoyuApi {
     }
   }
 }
+
+/**
+ * 取出 mock API 上某个事件订阅注册的回调，供测试主动触发主进程事件。
+ *
+ * 例如主进程的全局快捷键会直接隐藏窗口，渲染进程只能通过 stealth:hidden
+ * 事件得知，测试需要手动派发这个事件来覆盖该路径。
+ */
+export function getRegisteredEventHandler(
+  api: MoyuApi,
+  event: 'onStealthHidden' | 'onStealthShown'
+): (() => void) | undefined {
+  const spy = api.events[event] as unknown as { mock: { calls: unknown[][] } }
+  const lastCall = spy.mock.calls.at(-1)
+  return lastCall?.[0] as (() => void) | undefined
+}

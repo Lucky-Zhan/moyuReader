@@ -536,7 +536,10 @@ function App(): JSX.Element {
   /** Listen for stealth events from main process */
   useEffect(() => {
     const handleHidden = (): void => {
-      // Window is being hidden - could update UI state if needed
+      // 主进程的隐藏入口不止「鼠标移出」一个：全局快捷键（默认 Cmd/Ctrl+Shift+H）
+      // 会直接调用 hide()，渲染进程完全不知情。此时若还有 250ms 防抖中的进度
+      // 未落盘，窗口一隐藏就丢了。这里统一在隐藏事件里补一次 flush。
+      flushPendingProgress()
     }
     const handleShown = (): void => {
       // Window is being shown - could update UI state if needed
@@ -549,7 +552,7 @@ function App(): JSX.Element {
       unsubscribeHidden()
       unsubscribeShown()
     }
-  }, [])
+  }, [flushPendingProgress])
 
   return (
     <div

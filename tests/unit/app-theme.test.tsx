@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import App from '../../src/renderer/src/App'
 import {
@@ -10,7 +10,7 @@ import {
 } from '../../src/shared/constants'
 import type { MoyuApi } from '../../src/shared/moyu-api'
 import type { BookMeta, ReaderOpenResult } from '../../src/shared/types'
-import { createMockApi } from './mock-api'
+import { createMockApi, getRegisteredEventHandler } from './mock-api'
 
 const defaultSettings = {
   fontSize: 16,
@@ -68,6 +68,60 @@ beforeEach(() => {
 })
 
 describe('App reading progress behavior', () => {
+  it('flushes pending progress when the window is hidden by the global shortcut', async () => {
+    // 全局快捷键直接在主进程 hide()，渲染进程只能通过 stealth:hidden 得知。
+    // 若此时还有防抖中的进度没落盘，窗口一隐藏就丢了。
+    vi.mocked(api.reader.open).mockResolvedValue(
+      createOpenResult({
+        progress: { chapterIndex: 0, scrollPosition: 100, percentage: 50 }
+      })
+    )
+
+    render(<App />)
+
+    await screen.findByText('测试小说')
+    fireEvent.click(screen.getByText('测试小说'))
+    await screen.findByText('阅读进度：50%')
+
+    // 滚动事件经 requestAnimationFrame 合并，jsdom 不会自动执行回调，
+    // 这里手动驱动一帧，确保 processScroll 真的把进度写进了防抖队列。
+    vi.mocked(api.bookshelf.updateProgress).mockClear()
+    const rafCallbacks: FrameRequestCallback[] = []
+    const rafSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        rafCallbacks.push(cb)
+        return rafCallbacks.length
+      })
+
+    try {
+      fireEvent.scroll(screen.getByRole('document'), { target: { scrollTop: 240 } })
+      act(() => {
+        rafCallbacks.forEach((cb) => cb(0))
+      })
+
+      // 防抖（250ms）尚未到期，此时不应有任何写入。
+      expect(api.bookshelf.updateProgress).not.toHaveBeenCalled()
+
+      const handleHidden = getRegisteredEventHandler(api, 'onStealthHidden')
+      expect(handleHidden).toBeTypeOf('function')
+      act(() => {
+        handleHidden?.()
+      })
+
+      // 关键：同步断言。hide 事件处理器必须立刻落盘，
+      // 不能用 waitFor 兜底——否则 250ms 防抖定时器自己到期也会让断言通过，
+      // 测试就失去了意义。
+      expect(api.bookshelf.updateProgress).toHaveBeenCalledTimes(1)
+      expect(api.bookshelf.updateProgress).toHaveBeenCalledWith(
+        'book-1',
+        expect.objectContaining({ chapterIndex: 0 })
+      )
+    } finally {
+      rafSpy.mockRestore()
+    }
+  })
+
   it('restores saved progress when opening a book', async () => {
     vi.mocked(api.reader.open).mockResolvedValue(createOpenResult({
       progress: {
