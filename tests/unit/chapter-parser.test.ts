@@ -287,6 +287,37 @@ describe('ChapterParser', () => {
     })
   })
 
+  describe('正文噪声过滤', () => {
+    it('不应把小数测量值误识别为章节', () => {
+      const content = [
+        '第1章 李源',
+        '3.9级的身体素质，放眼全省其实不算差。',
+        '5.0级，是正常成人标准。',
+        '第2章 继续'
+      ].join('\n')
+
+      const chapters = parser.parse(content)
+      expect(chapters.map((chapter) => chapter.title)).toEqual(['第1章 李源', '第2章 继续'])
+    })
+
+    it('显式章节标题占主导时应忽略正文编号列表', () => {
+      const content = [
+        '第1章 开始',
+        '1、达到黄金段位，奖励5万蓝星币。',
+        '2、达到陨星段位，奖励50万蓝星币。',
+        '第2章 继续',
+        '第3章 结束'
+      ].join('\n')
+
+      const chapters = parser.parse(content)
+      expect(chapters.map((chapter) => chapter.title)).toEqual([
+        '第1章 开始',
+        '第2章 继续',
+        '第3章 结束'
+      ])
+    })
+  })
+
   describe('边界情况', () => {
     it('行首有空格时仍应匹配', () => {
       const content = '  第一章 开始\n内容'

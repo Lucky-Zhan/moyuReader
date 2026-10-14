@@ -125,8 +125,10 @@ export class FileImporter {
     if (encoding === 'utf-8') {
       content = buffer.toString('utf-8')
     } else {
-      // GBK 编码使用 iconv-lite 解码
-      content = iconv.decode(buffer, 'gbk')
+      // 用 gb18030 而不是 gbk 解码：GB18030 是 GBK 的超集，GBK 无法解码
+      // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
+      // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
+      content = iconv.decode(buffer, 'gb18030')
     }
 
     return { content, encoding }
@@ -153,8 +155,10 @@ export class FileImporter {
     if (encoding === 'utf-8') {
       content = buffer.toString('utf-8')
     } else {
-      // GBK 编码使用 iconv-lite 解码
-      content = iconv.decode(buffer, 'gbk')
+      // 用 gb18030 而不是 gbk 解码：GB18030 是 GBK 的超集，GBK 无法解码
+      // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
+      // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
+      content = iconv.decode(buffer, 'gb18030')
     }
 
     return { content, encoding }

@@ -3,12 +3,20 @@ import type { MoyuApi } from '../../src/shared/moyu-api'
 
 export function createMockApi(): MoyuApi {
   return {
+    window: {
+      drag: {
+        start: vi.fn().mockResolvedValue(undefined),
+        moveBy: vi.fn().mockResolvedValue(undefined),
+        end: vi.fn().mockResolvedValue(undefined)
+      }
+    },
     file: {
       import: vi.fn().mockResolvedValue(null),
       importMany: vi.fn().mockResolvedValue([])
     },
     bookshelf: {
       getAll: vi.fn().mockResolvedValue([]),
+      getLibrary: vi.fn().mockResolvedValue([]),
       remove: vi.fn().mockResolvedValue(undefined),
       updateProgress: vi.fn().mockResolvedValue(undefined),
       getProgress: vi.fn().mockResolvedValue(null),
@@ -35,7 +43,10 @@ export function createMockApi(): MoyuApi {
       setFontFamily: vi.fn().mockResolvedValue(undefined),
       setLineHeight: vi.fn().mockResolvedValue(undefined),
       setDisguiseTheme: vi.fn().mockResolvedValue(undefined),
-      setStealthEnabled: vi.fn().mockResolvedValue(undefined)
+      setStealthEnabled: vi.fn().mockResolvedValue(undefined),
+      setMouseLeaveAction: vi.fn().mockResolvedValue(undefined),
+      setMouseLeaveDelay: vi.fn().mockResolvedValue(undefined),
+      setMouseReturnDelay: vi.fn().mockResolvedValue(undefined)
     },
     stealth: {
       setDisguise: vi.fn().mockResolvedValue(undefined),

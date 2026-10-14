@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import type {
   AppSettings,
   Bookmark,
@@ -6,17 +7,62 @@ import type {
   ChapterContent,
   ReadingProgress,
   SearchResult,
-  DisguiseTheme as DisguiseThemeType
+  DisguiseTheme as DisguiseThemeType,
+  MouseLeaveAction
 } from '../../shared/types'
 import BookshelfView from './components/BookshelfView'
 import { ReaderView } from './components/ReaderView'
-import { ChapterList } from './components/ChapterList'
+import ChapterDrawer from './components/ChapterDrawer'
 import { DisguiseTheme, getThemeClassName } from './components/DisguiseTheme'
 import Toast from './components/Toast'
-import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT } from '../../shared/constants'
+import {
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_MOUSE_LEAVE_ACTION,
+  DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+  DEFAULT_MOUSE_RETURN_DELAY
+} from '../../shared/constants'
+import './styles/tokens.css'
+import './styles/tooltip.css'
 import './App.css'
 
 type AppView = 'bookshelf' | 'reader'
+
+const WINDOW_DRAG_REGION_HEIGHT = 88
+
+interface WindowDragState {
+  pointerId: number | null
+  lastScreenX: number
+  lastScreenY: number
+  pendingDeltaX: number
+  pendingDeltaY: number
+  frame: number | null
+}
+
+function getPointerScreenPosition(event: ReactPointerEvent<HTMLDivElement>): {
+  x: number
+  y: number
+} {
+  return {
+    x: Number.isFinite(event.screenX) ? event.screenX : event.clientX,
+    y: Number.isFinite(event.screenY) ? event.screenY : event.clientY
+  }
+}
+
+function isWindowDragSurface(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  // The reader toolbar is a <details> container, but its blank chrome is
+  // still a valid title surface. Only controls and explicitly interactive
+  // popover content opt out of dragging; excluding the whole details node
+  // makes the visible toolbar impossible to use as a grab handle.
+  if (target.closest('button, input, select, summary, a, [data-no-window-drag]')) {
+    return false
+  }
+  return Boolean(
+    target.closest('.app-drag-region, .reader-toolbar-reveal-zone, .app-topbar, .reader-toolbar')
+  )
+}
 
 function App(): JSX.Element {
   const [view, setView] = useState<AppView>('bookshelf')
@@ -30,17 +76,189 @@ function App(): JSX.Element {
   })
   const [disguiseTheme, setDisguiseTheme] = useState<DisguiseThemeType>('dark')
   const [stealthEnabled, setStealthEnabled] = useState<boolean>(true)
+  const [mouseLeaveAction, setMouseLeaveAction] = useState<MouseLeaveAction>(
+    DEFAULT_MOUSE_LEAVE_ACTION
+  )
+  const [mouseLeaveDelay, setMouseLeaveDelay] = useState<number>(DEFAULT_MOUSE_LEAVE_QUIT_DELAY)
+  const [mouseReturnDelay, setMouseReturnDelay] = useState<number>(DEFAULT_MOUSE_RETURN_DELAY)
   const [fontSize, setFontSize] = useState<number>(DEFAULT_FONT_SIZE)
   const [fontFamily, setFontFamily] = useState<string>(DEFAULT_FONT_FAMILY)
   const [lineHeight, setLineHeight] = useState<number>(DEFAULT_LINE_HEIGHT)
-  const [chapterListVisible, setChapterListVisible] = useState<boolean>(true)
+  const [chapterListVisible, setChapterListVisible] = useState<boolean>(false)
+  const chapterDrawerTriggerRef = useRef<HTMLButtonElement>(null)
   const [readerNavigationKey, setReaderNavigationKey] = useState<number>(0)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [targetChapterOffset, setTargetChapterOffset] = useState<number | null>(null)
+  const progressSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingProgressRef = useRef<{ bookId: string; progress: ReadingProgress } | null>(null)
+  const isWindowDraggingRef = useRef(false)
+  const windowDragRef = useRef<WindowDragState>({
+    pointerId: null,
+    lastScreenX: 0,
+    lastScreenY: 0,
+    pendingDeltaX: 0,
+    pendingDeltaY: 0,
+    frame: null
+  })
+
+  /** 立即写入当前待保存进度，并取消已有 debounce。 */
+  const flushPendingProgress = useCallback((): void => {
+    if (progressSaveTimerRef.current !== null) {
+      clearTimeout(progressSaveTimerRef.current)
+      progressSaveTimerRef.current = null
+    }
+
+    const pending = pendingProgressRef.current
+    pendingProgressRef.current = null
+    if (!pending) return
+
+    void window.api.bookshelf.updateProgress(pending.bookId, pending.progress)
+  }, [])
+
+  /** 滚动期间只保留最新进度，停止约 250ms 后再通过 IPC 持久化。 */
+  const scheduleProgressSave = useCallback(
+    (bookId: string, progress: ReadingProgress): void => {
+      pendingProgressRef.current = { bookId, progress }
+      if (progressSaveTimerRef.current !== null) {
+        clearTimeout(progressSaveTimerRef.current)
+      }
+      progressSaveTimerRef.current = setTimeout(() => {
+        progressSaveTimerRef.current = null
+        flushPendingProgress()
+      }, 250)
+    },
+    [flushPendingProgress]
+  )
+
+  /** 换章、跳转等离开当前阅读位置的动作必须立即保存。 */
+  const persistProgressImmediately = useCallback(
+    (bookId: string, progress: ReadingProgress): void => {
+      flushPendingProgress()
+      pendingProgressRef.current = { bookId, progress }
+      flushPendingProgress()
+    },
+    [flushPendingProgress]
+  )
+
+  const flushWindowDrag = useCallback((): void => {
+    const drag = windowDragRef.current
+    drag.frame = null
+    const deltaX = Math.round(drag.pendingDeltaX)
+    const deltaY = Math.round(drag.pendingDeltaY)
+    drag.pendingDeltaX = 0
+    drag.pendingDeltaY = 0
+    if (deltaX === 0 && deltaY === 0) return
+
+    void Promise.resolve(window.api.window.drag.moveBy(deltaX, deltaY)).catch(() => undefined)
+  }, [])
+
+  const scheduleWindowDragFlush = useCallback((): void => {
+    const drag = windowDragRef.current
+    if (typeof window.requestAnimationFrame !== 'function') {
+      flushWindowDrag()
+      return
+    }
+    if (drag.frame !== null) return
+    drag.frame = window.requestAnimationFrame(() => {
+      flushWindowDrag()
+    })
+  }, [flushWindowDrag])
+
+  const handleWindowDragPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      if (
+        isWindowDraggingRef.current ||
+        event.button !== 0 ||
+        (event.isPrimary === false && event.pointerType === 'touch') ||
+        event.clientY > WINDOW_DRAG_REGION_HEIGHT ||
+        !isWindowDragSurface(event.target)
+      ) {
+        return
+      }
+
+      const position = getPointerScreenPosition(event)
+      const drag = windowDragRef.current
+      drag.pointerId = event.pointerId
+      drag.lastScreenX = position.x
+      drag.lastScreenY = position.y
+      drag.pendingDeltaX = 0
+      drag.pendingDeltaY = 0
+      isWindowDraggingRef.current = true
+      event.preventDefault()
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      void Promise.resolve(window.api.window.drag.start()).catch(() => {
+        const currentDrag = windowDragRef.current
+        if (currentDrag.pointerId !== event.pointerId) return
+        if (currentDrag.frame !== null && typeof window.cancelAnimationFrame === 'function') {
+          window.cancelAnimationFrame(currentDrag.frame)
+        }
+        currentDrag.frame = null
+        currentDrag.pendingDeltaX = 0
+        currentDrag.pendingDeltaY = 0
+        isWindowDraggingRef.current = false
+        currentDrag.pointerId = null
+        if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      })
+    },
+    []
+  )
+
+  const handleWindowDragPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const drag = windowDragRef.current
+      if (!isWindowDraggingRef.current || drag.pointerId !== event.pointerId) return
+
+      const position = getPointerScreenPosition(event)
+      drag.pendingDeltaX += position.x - drag.lastScreenX
+      drag.pendingDeltaY += position.y - drag.lastScreenY
+      drag.lastScreenX = position.x
+      drag.lastScreenY = position.y
+      event.preventDefault()
+      scheduleWindowDragFlush()
+    },
+    [scheduleWindowDragFlush]
+  )
+
+  const handleWindowDragPointerEnd = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const drag = windowDragRef.current
+      if (!isWindowDraggingRef.current || drag.pointerId !== event.pointerId) return
+
+      if (drag.frame !== null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(drag.frame)
+        drag.frame = null
+      }
+      flushWindowDrag()
+      isWindowDraggingRef.current = false
+      drag.pointerId = null
+      void Promise.resolve(window.api.window.drag.end()).catch(() => undefined)
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+    },
+    [flushWindowDrag]
+  )
+
+  useEffect(() => {
+    return () => {
+      const frame = windowDragRef.current.frame
+      if (frame !== null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(frame)
+      }
+      windowDragRef.current.frame = null
+      if (isWindowDraggingRef.current) {
+        void Promise.resolve(window.api.window.drag.end()).catch(() => undefined)
+      }
+      isWindowDraggingRef.current = false
+    }
+  }, [])
 
   /** Open a book: fetch content and progress, switch to reader view */
   const handleOpenBook = useCallback(async (bookId: string) => {
+    flushPendingProgress()
     try {
       const result = await window.api.reader.open(bookId)
       if (!result) return
@@ -52,27 +270,29 @@ function App(): JSX.Element {
       setBookmarks(await window.api.bookmarks.get(bookId))
       setSearchResults([])
       setTargetChapterOffset(null)
+      setChapterListVisible(false)
       setReaderNavigationKey((key) => key + 1)
 
       setView('reader')
     } catch {
       // Failed to open book, stay on bookshelf
     }
-  }, [])
+  }, [flushPendingProgress])
 
   /** Handle progress change in reader */
   const handleProgressChange = useCallback(
     (progress: ReadingProgress) => {
       setCurrentProgress(progress)
       if (currentBookId) {
-        void window.api.bookshelf.updateProgress(currentBookId, progress)
+        scheduleProgressSave(currentBookId, progress)
       }
     },
-    [currentBookId]
+    [currentBookId, scheduleProgressSave]
   )
 
   /** Handle back to bookshelf */
   const handleBack = useCallback(() => {
+    flushPendingProgress()
     setView('bookshelf')
     setCurrentBookId(null)
     setCurrentChapterContent(null)
@@ -81,12 +301,14 @@ function App(): JSX.Element {
     setSearchResults([])
     setBookmarks([])
     setTargetChapterOffset(null)
-  }, [])
+    setChapterListVisible(false)
+  }, [flushPendingProgress])
 
   /** Handle chapter selection */
   const handleSelectChapter = useCallback(
     async (index: number) => {
       if (!currentBookId || index < 0 || index >= currentChapters.length) return
+      flushPendingProgress()
       try {
         const chapterContent = await window.api.reader.getChapterContent(currentBookId, index)
         if (!chapterContent) return
@@ -104,12 +326,12 @@ function App(): JSX.Element {
         setCurrentProgress(newProgress)
         setTargetChapterOffset(null)
         setReaderNavigationKey((key) => key + 1)
-        void window.api.bookshelf.updateProgress(currentBookId, newProgress)
+        persistProgressImmediately(currentBookId, newProgress)
       } catch {
         // Failed to load chapter, keep the current reading position.
       }
     },
-    [currentChapters, currentBookId]
+    [currentChapters, currentBookId, flushPendingProgress, persistProgressImmediately]
   )
 
   const handleLoadChapterContent = useCallback(
@@ -139,6 +361,7 @@ function App(): JSX.Element {
   const handleSelectSearchResult = useCallback(
     async (result: SearchResult) => {
       if (!currentBookId) return
+      flushPendingProgress()
       const chapterContent = await window.api.reader.getChapterContent(
         currentBookId,
         result.chapterIndex
@@ -158,10 +381,11 @@ function App(): JSX.Element {
       setCurrentChapterContent(chapterContent)
       setCurrentProgress(nextProgress)
       setTargetChapterOffset(result.chapterOffset)
+      setSearchResults([])
       setReaderNavigationKey((key) => key + 1)
-      void window.api.bookshelf.updateProgress(currentBookId, nextProgress)
+      persistProgressImmediately(currentBookId, nextProgress)
     },
-    [currentBookId]
+    [currentBookId, flushPendingProgress, persistProgressImmediately]
   )
 
   const handleAddBookmark = useCallback(async () => {
@@ -181,6 +405,7 @@ function App(): JSX.Element {
   const handleSelectBookmark = useCallback(
     async (bookmark: Bookmark) => {
       if (!currentBookId) return
+      flushPendingProgress()
       const chapterContent = await window.api.reader.getChapterContent(
         currentBookId,
         bookmark.chapterIndex
@@ -197,9 +422,9 @@ function App(): JSX.Element {
       setCurrentProgress(nextProgress)
       setTargetChapterOffset(null)
       setReaderNavigationKey((key) => key + 1)
-      void window.api.bookshelf.updateProgress(currentBookId, nextProgress)
+      persistProgressImmediately(currentBookId, nextProgress)
     },
-    [currentBookId]
+    [currentBookId, flushPendingProgress, persistProgressImmediately]
   )
 
   const handleRemoveBookmark = useCallback(
@@ -223,6 +448,21 @@ function App(): JSX.Element {
     void window.api.settings.setStealthEnabled(enabled)
   }, [])
 
+  const handleMouseLeaveActionChange = useCallback((action: MouseLeaveAction) => {
+    setMouseLeaveAction(action)
+    void window.api.settings.setMouseLeaveAction(action)
+  }, [])
+
+  const handleMouseLeaveDelayChange = useCallback((delay: number) => {
+    setMouseLeaveDelay(delay)
+    void window.api.settings.setMouseLeaveDelay(delay)
+  }, [])
+
+  const handleMouseReturnDelayChange = useCallback((delay: number) => {
+    setMouseReturnDelay(delay)
+    void window.api.settings.setMouseReturnDelay(delay)
+  }, [])
+
   /** Load persisted application settings */
   useEffect(() => {
     let mounted = true
@@ -232,6 +472,9 @@ function App(): JSX.Element {
       const appSettings: AppSettings = settings
       setDisguiseTheme(appSettings.disguiseTheme)
       setStealthEnabled(appSettings.stealthEnabled)
+      setMouseLeaveAction(appSettings.mouseLeaveAction)
+      setMouseLeaveDelay(appSettings.mouseLeaveDelay)
+      setMouseReturnDelay(appSettings.mouseReturnDelay ?? DEFAULT_MOUSE_RETURN_DELAY)
       setFontSize(appSettings.fontSize)
       setFontFamily(appSettings.fontFamily)
       setLineHeight(appSettings.lineHeight)
@@ -243,12 +486,29 @@ function App(): JSX.Element {
     }
   }, [])
 
+  const disguiseThemeControl = (
+    <DisguiseTheme
+      theme={disguiseTheme}
+      stealthEnabled={stealthEnabled}
+      mouseLeaveAction={mouseLeaveAction}
+      mouseLeaveDelay={mouseLeaveDelay}
+      mouseReturnDelay={mouseReturnDelay}
+      onThemeChange={handleThemeChange}
+      onStealthEnabledChange={handleStealthEnabledChange}
+      onMouseLeaveActionChange={handleMouseLeaveActionChange}
+      onMouseLeaveDelayChange={handleMouseLeaveDelayChange}
+      onMouseReturnDelayChange={handleMouseReturnDelayChange}
+    />
+  )
+
   /** Mouse tracking for stealth mode */
   const handleMouseLeave = useCallback(() => {
+    if (isWindowDraggingRef.current) return
+    flushPendingProgress()
     if (stealthEnabled) {
       void window.api.stealth.mouseLeave()
     }
-  }, [stealthEnabled])
+  }, [flushPendingProgress, stealthEnabled])
 
   const handleMouseEnter = useCallback(() => {
     if (stealthEnabled) {
@@ -266,6 +526,12 @@ function App(): JSX.Element {
       window.removeEventListener('focus', handleMouseEnter)
     }
   }, [handleMouseEnter, handleMouseLeave])
+
+  useEffect(() => {
+    return () => {
+      flushPendingProgress()
+    }
+  }, [flushPendingProgress])
 
   /** Listen for stealth events from main process */
   useEffect(() => {
@@ -287,31 +553,21 @@ function App(): JSX.Element {
 
   return (
     <div
-      className={`app ${getThemeClassName(disguiseTheme)}`}
+      className={`app ${getThemeClassName(disguiseTheme)} ${view === 'reader' ? 'app-reading' : 'app-library'}`}
       onMouseLeave={handleMouseLeave}
       onMouseEnter={handleMouseEnter}
+      onPointerDown={handleWindowDragPointerDown}
+      onPointerMove={handleWindowDragPointerMove}
+      onPointerUp={handleWindowDragPointerEnd}
+      onPointerCancel={handleWindowDragPointerEnd}
     >
       <div className="app-drag-region" />
-      <div className="app-topbar">
-        <DisguiseTheme
-          theme={disguiseTheme}
-          stealthEnabled={stealthEnabled}
-          onThemeChange={handleThemeChange}
-          onStealthEnabledChange={handleStealthEnabledChange}
-        />
-      </div>
+      {view === 'bookshelf' && <div className="app-topbar">{disguiseThemeControl}</div>}
 
       {view === 'bookshelf' && <BookshelfView onOpenBook={handleOpenBook} />}
 
       {view === 'reader' && (
         <div className="reader-layout">
-          {chapterListVisible && (
-            <ChapterList
-              chapters={currentChapters}
-              currentChapterIndex={currentProgress.chapterIndex}
-              onSelectChapter={handleSelectChapter}
-            />
-          )}
           <div className="reader-main">
             {currentChapterContent && (
               <ReaderView
@@ -337,10 +593,20 @@ function App(): JSX.Element {
                 initialLineHeight={lineHeight}
                 chapterListVisible={chapterListVisible}
                 navigationKey={readerNavigationKey}
+                chapterListTriggerRef={chapterDrawerTriggerRef}
                 onToggleChapterList={() => setChapterListVisible((visible) => !visible)}
+                settingsSlot={disguiseThemeControl}
               />
             )}
           </div>
+          <ChapterDrawer
+            open={chapterListVisible}
+            chapters={currentChapters}
+            currentChapterIndex={currentProgress.chapterIndex}
+            onSelectChapter={handleSelectChapter}
+            onClose={() => setChapterListVisible(false)}
+            triggerRef={chapterDrawerTriggerRef}
+          />
         </div>
       )}
 

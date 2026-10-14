@@ -11,6 +11,9 @@ export const IPC_CHANNELS = {
   /** 获取所有书籍 */
   BOOKSHELF_GET_ALL: 'bookshelf:getAll',
 
+  /** 获取书架条目（书籍 + 进度，一次返回） */
+  BOOKSHELF_GET_LIBRARY: 'bookshelf:getLibrary',
+
   /** 删除书籍 */
   BOOKSHELF_REMOVE: 'bookshelf:remove',
 
@@ -74,11 +77,29 @@ export const IPC_CHANNELS = {
   /** 设置隐蔽模式开关 */
   SETTINGS_SET_STEALTH_ENABLED: 'settings:setStealthEnabled',
 
+  /** 设置鼠标移出后的处理方式 */
+  SETTINGS_SET_MOUSE_LEAVE_ACTION: 'settings:setMouseLeaveAction',
+
+  /** 设置鼠标移出后的延迟时间 */
+  SETTINGS_SET_MOUSE_LEAVE_DELAY: 'settings:setMouseLeaveDelay',
+
+  /** 设置鼠标回到隐藏位置后的显形延迟 */
+  SETTINGS_SET_MOUSE_RETURN_DELAY: 'settings:setMouseReturnDelay',
+
   /** 鼠标移出窗口区域（渲染进程 -> 主进程） */
   STEALTH_MOUSE_LEAVE: 'stealth:mouseLeave',
 
   /** 鼠标移入窗口区域（渲染进程 -> 主进程） */
   STEALTH_MOUSE_ENTER: 'stealth:mouseEnter',
+
+  /** 开始拖动当前窗口 */
+  WINDOW_DRAG_START: 'window:dragStart',
+
+  /** 拖动窗口时按屏幕位移移动当前窗口 */
+  WINDOW_MOVE_BY: 'window:moveBy',
+
+  /** 结束拖动当前窗口 */
+  WINDOW_DRAG_END: 'window:dragEnd',
 } as const;
 
 /** Main -> Renderer 事件通道 */

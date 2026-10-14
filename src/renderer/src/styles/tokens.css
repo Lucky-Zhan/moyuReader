@@ -1,0 +1,112 @@
+/**
+ * Design tokens.
+ *
+ * The previous scale was set far too small for a desktop app: book titles were
+ * 13px, metadata 10px, and the reader status bar 10px. Those sizes are legible
+ * on a phone at arm's length, not on a 1100px desktop window. The scale below
+ * follows a 1.125–1.2 ratio with a 15px body baseline, which is the smallest
+ * size that still reads comfortably for CJK text.
+ */
+:root {
+  /* ---- Type ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Reading defaults to a serif CJK stack: prose in a code font is a
+   * deliberate disguise choice, not a sensible default. */
+  --font-reading: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC",
+    "Songti TC", SimSun, Georgia, serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Consolas, Monaco, "Courier New", monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 21px;
+  --text-2xl: 26px;
+  --text-3xl: 32px;
+
+  --leading-tight: 1.25;
+  --leading-snug: 1.4;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.75;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 680;
+
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.06em;
+  --tracking-caps: 0.09em;
+
+  /* ---- Motion ---- */
+  --ease-apple-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-apple-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-apple-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-press: 120ms;
+  --duration-popover: 170ms;
+  --duration-sheet: 220ms;
+  --duration-theme: 320ms;
+  --duration-tooltip: 150ms;
+  --tooltip-delay: 420ms;
+
+  /* ---- Geometry ---- */
+  --control-height-sm: 30px;
+  --control-height: 34px;
+  --control-height-lg: 42px;
+  --toolbar-height: 52px;
+  --control-radius-sm: 8px;
+  --control-radius: 10px;
+  --control-radius-lg: 14px;
+  --control-radius-xl: 18px;
+  --control-gap: 8px;
+  --control-press-scale: 0.97;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Reader measure: ~34 CJK characters per line at the default size. */
+  --reader-measure: 34em;
+
+  /* Left inset that clears the macOS traffic lights in the reader toolbar. */
+  --toolbar-leading-inset: 100px;
+
+  /* ---- Surfaces ---- */
+  --surface-canvas: var(--app-bg, #f7f7f8);
+  --surface-elevated: var(--panel-bg, #ffffff);
+  --surface-popover: var(--menu-bg, #ffffff);
+  --surface-control-hover: var(--hover-bg, rgba(0, 0, 0, 0.06));
+  --surface-control-active: var(--active-bg, rgba(0, 122, 255, 0.14));
+  --surface-sunken: color-mix(in srgb, var(--surface-canvas) 60%, var(--surface-elevated));
+
+  /* ---- Ink ---- */
+  --ink-primary: var(--text, #1d1d1f);
+  --ink-secondary: var(--muted, #6e6e73);
+  --ink-tertiary: color-mix(in srgb, var(--ink-secondary) 74%, transparent);
+  --separator: var(--border, rgba(60, 60, 67, 0.18));
+  --separator-soft: color-mix(in srgb, var(--separator) 55%, transparent);
+  --tint: var(--accent, #007aff);
+  --danger-ink: var(--danger, #ff3b30);
+
+  /* ---- Materials ---- */
+  --material-glass: color-mix(in srgb, var(--surface-canvas) 82%, transparent);
+  --material-popover: color-mix(in srgb, var(--surface-popover) 96%, transparent);
+
+  /* ---- Elevation ---- */
+  --shadow-xs: 0 1px 2px color-mix(in srgb, var(--shadow, rgba(0, 0, 0, 0.3)) 12%, transparent);
+  --shadow-sm: 0 2px 8px color-mix(in srgb, var(--shadow, rgba(0, 0, 0, 0.3)) 16%, transparent);
+  --shadow-md: 0 8px 24px color-mix(in srgb, var(--shadow, rgba(0, 0, 0, 0.3)) 20%, transparent);
+  --shadow-lg: 0 18px 44px color-mix(in srgb, var(--shadow, rgba(0, 0, 0, 0.3)) 26%, transparent);
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --separator: color-mix(in srgb, var(--ink-primary) 48%, transparent);
+    --separator-soft: color-mix(in srgb, var(--ink-primary) 34%, transparent);
+    --ink-tertiary: color-mix(in srgb, var(--ink-primary) 78%, transparent);
+    --material-glass: var(--surface-elevated);
+    --material-popover: var(--surface-popover);
+  }
+}

@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import Store from 'electron-store'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
 import { randomUUID } from 'crypto'
 import type {
@@ -13,16 +13,26 @@ import type {
   SearchResult,
   Bookmark,
   BookmarkInput,
+  LibraryItem,
   MoyuBackup
 } from '../shared/types'
 import { MAX_TITLE_LENGTH } from '../shared/constants'
+import { findChapterIndexForOffset, getChapterType } from '../shared/chapter-patterns'
+import { ChapterParser, CHAPTER_PARSER_VERSION } from './chapter-parser'
 
-/** 大文件阈值：5MB */
-const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
+/**
+ * 正文存储策略。
+ *
+ * 之前只有 >5MB 的书才落盘，小书正文塞进 electron-store 的 fileContents
+ * 这个 Record 里。每导入一本小书都要把**之前所有书的正文**重新序列化写一遍
+ * （10 本书就是几百 MB 的 JSON 反复读写），删除、备份快照同理。
+ * 现在正文一律存成独立文件，store 里只留元数据。
+ */
 
-/** electron-store schema */
+/** electron-store schema（只存元数据，不存正文） */
 interface StoreSchema {
   books: BookMeta[]
+  /** 旧版本内联保存的正文；仅在迁移时读取，迁移后清空 */
   fileContents: Record<string, string>
   progress: Record<string, ReadingProgress>
   bookmarks: Record<string, Bookmark[]>
@@ -35,6 +45,18 @@ interface StoreSnapshot {
   bookmarks: Record<string, Bookmark[]>
 }
 
+interface ChapterMigration {
+  bookId: string
+  previousChapters: Chapter[]
+  nextChapters: Chapter[]
+}
+
+interface HydratedBooksResult {
+  books: BookMeta[]
+  changed: boolean
+  migrations: ChapterMigration[]
+}
+
 /**
  * 书架管理器
  * 负责小说列表管理和数据持久化
@@ -42,6 +64,7 @@ interface StoreSnapshot {
 export class BookshelfManager {
   private store: Store<StoreSchema>
   private booksDir: string
+  private readonly chapterParser = new ChapterParser()
 
   constructor(store?: Store<StoreSchema>) {
     this.store = store ?? new Store<StoreSchema>({
@@ -67,8 +90,24 @@ export class BookshelfManager {
     const hydratedBooks = this.hydrateStoredChapterTitles(books)
     if (hydratedBooks.changed) {
       this.store.set('books', hydratedBooks.books)
+      this.migrateChapterReferences(hydratedBooks.migrations)
     }
     return hydratedBooks.books
+  }
+
+  /**
+   * 一次性返回书架条目：书籍元数据 + 阅读进度。
+   *
+   * 书架视图需要每本书的进度，早期实现是渲染进程对每本书各发一次
+   * getProgress，书一多就是 N+1 次 IPC 往返。这里在同一个进程内一次性拼好，
+   * 只走一次 IPC。
+   */
+  getLibrary(): LibraryItem[] {
+    const progress = this.store.get('progress', {})
+    return this.getAllBooks().map((book) => ({
+      book,
+      progress: progress[book.id] ?? null
+    }))
   }
 
   /** 添加书籍到书架 */
@@ -76,7 +115,7 @@ export class BookshelfManager {
     const id = randomUUID()
     const now = Date.now()
     const snapshot = this.createStoreSnapshot()
-    let largeFileWritten = false
+    let contentWritten = false
 
     const meta: BookMeta = {
       id,
@@ -84,20 +123,15 @@ export class BookshelfManager {
       filePath: bookData.filePath,
       fileSize: bookData.fileSize,
       chapters,
+      chapterParserVersion: CHAPTER_PARSER_VERSION,
       addedAt: now,
       lastReadAt: now
     }
 
     try {
       // 先持久化正文，再提交元数据。异常时回滚，避免书架指向不存在的正文。
-      if (bookData.fileSize > LARGE_FILE_THRESHOLD) {
-        this.writeLargeFile(id, bookData.content)
-        largeFileWritten = true
-      } else {
-        const fileContents = this.store.get('fileContents', {})
-        fileContents[id] = bookData.content
-        this.store.set('fileContents', fileContents)
-      }
+      this.writeBookContentFile(id, bookData.content)
+      contentWritten = true
 
       const books = this.store.get('books', [])
       books.push(meta)
@@ -105,8 +139,8 @@ export class BookshelfManager {
 
       return meta
     } catch (error) {
-      if (largeFileWritten) {
-        this.removeLargeFileIfExists(id)
+      if (contentWritten) {
+        this.removeBookContentFileIfExists(id)
       }
       this.restoreStoreSnapshot(snapshot)
       throw error
@@ -120,28 +154,19 @@ export class BookshelfManager {
     if (bookIndex === -1) return
 
     const snapshot = this.createStoreSnapshot()
-    const book = books[bookIndex]
     const nextBooks = books.filter((b) => b.id !== bookId)
-    const fileContents = this.store.get('fileContents', {})
     const progress = this.store.get('progress', {})
     const bookmarks = this.store.get('bookmarks', {})
     delete progress[bookId]
     delete bookmarks[bookId]
 
     try {
-      if (book.fileSize <= LARGE_FILE_THRESHOLD) {
-        delete fileContents[bookId]
-        this.store.set('fileContents', fileContents)
-      }
-
       this.store.set('progress', progress)
       this.store.set('bookmarks', bookmarks)
       this.store.set('books', nextBooks)
 
-      // 大文件正文最后删除：若删除失败，可回滚元数据，避免书籍不可读。
-      if (book.fileSize > LARGE_FILE_THRESHOLD) {
-        this.removeLargeFile(bookId)
-      }
+      // 正文最后删除：若删除失败，可回滚元数据，避免书籍不可读。
+      this.removeBookContentFile(bookId)
     } catch (error) {
       this.restoreStoreSnapshot(snapshot)
       throw error
@@ -199,12 +224,7 @@ export class BookshelfManager {
     const book = books.find((b) => b.id === bookId)
     if (!book) return null
 
-    if (book.fileSize > LARGE_FILE_THRESHOLD) {
-      return this.readLargeFile(bookId)
-    } else {
-      const fileContents = this.store.get('fileContents', {})
-      return fileContents[bookId] ?? null
-    }
+    return this.readBookContent(book)
   }
 
   /** 获取单章正文 */
@@ -326,43 +346,39 @@ export class BookshelfManager {
     this.assertBackup(backup)
     const snapshot = this.createStoreSnapshot()
     const previousBooks = snapshot.books
-    const previousLargeFileContents = previousBooks
-      .filter((book) => book.fileSize > LARGE_FILE_THRESHOLD)
+    // 快照只用于失败回滚。旧数据里可能残留不安全的 id，这里按“尽力备份”
+    // 处理：读不到就记为需要清理，而不是让整个恢复流程直接失败。
+    // 正文可能还在旧的内联 fileContents 里，因此走 readBookContent 而非只读文件。
+    const previousContents = previousBooks
+      .filter((book) => isSafeBookId(book.id))
       .map((book) => ({
         id: book.id,
-        content: this.readLargeFile(book.id) ?? ''
+        content: this.readBookContent(book) ?? ''
       }))
-    const nextFileContents: Record<string, string> = {}
 
     try {
       for (const book of previousBooks) {
-        if (book.fileSize > LARGE_FILE_THRESHOLD) {
-          this.removeLargeFileIfExists(book.id)
+        if (isSafeBookId(book.id)) {
+          this.removeBookContentFileIfExists(book.id)
         }
       }
 
       for (const { meta, content } of backup.books) {
-        if (meta.fileSize > LARGE_FILE_THRESHOLD) {
-          this.writeLargeFile(meta.id, content)
-        } else {
-          nextFileContents[meta.id] = content
-        }
+        this.writeBookContentFile(meta.id, content)
       }
 
       this.store.set('books', backup.books.map((item) => item.meta))
-      this.store.set('fileContents', nextFileContents)
+      this.store.set('fileContents', {})
       this.store.set('progress', backup.progress)
       this.store.set('bookmarks', backup.bookmarks)
       return backup.books.length
     } catch (error) {
       this.restoreStoreSnapshot(snapshot)
       for (const { meta } of backup.books) {
-        if (meta.fileSize > LARGE_FILE_THRESHOLD) {
-          this.removeLargeFileIfExists(meta.id)
-        }
+        this.removeBookContentFileIfExists(meta.id)
       }
-      for (const previous of previousLargeFileContents) {
-        this.writeLargeFile(previous.id, previous.content)
+      for (const previous of previousContents) {
+        this.writeBookContentFile(previous.id, previous.content)
       }
       throw error
     }
@@ -383,30 +399,46 @@ export class BookshelfManager {
     this.store.set('books', books)
   }
 
-  /** 将大文件内容写入独立文件 */
-  private writeLargeFile(bookId: string, content: string): void {
+  /**
+   * 解析大文件正文路径，并确保它始终落在 booksDir 之内。
+   *
+   * bookId 来自备份文件，属于不可信输入：`../../x` 这类 id 会让 join 逃出
+   * booksDir，把正文写到用户目录之外（甚至覆盖任意文件）。这里统一做包含性
+   * 校验，越界直接抛错。
+   */
+  private resolveLargeFilePath(bookId: string): string {
     const filePath = join(this.booksDir, `${bookId}.txt`)
-    writeFileSync(filePath, content, 'utf-8')
+    const resolvedDir = resolve(this.booksDir)
+    const resolvedPath = resolve(filePath)
+    if (resolvedPath !== join(resolvedDir, `${bookId}.txt`) || !resolvedPath.startsWith(resolvedDir + sep)) {
+      throw new TypeError('Invalid book id')
+    }
+    return resolvedPath
+  }
+
+  /** 将大文件内容写入独立文件 */
+  private writeBookContentFile(bookId: string, content: string): void {
+    writeFileSync(this.resolveLargeFilePath(bookId), content, 'utf-8')
   }
 
   /** 读取大文件内容 */
-  private readLargeFile(bookId: string): string | null {
-    const filePath = join(this.booksDir, `${bookId}.txt`)
+  private readBookContentFile(bookId: string): string | null {
+    const filePath = this.resolveLargeFilePath(bookId)
     if (!existsSync(filePath)) return null
     return readFileSync(filePath, 'utf-8')
   }
 
   /** 删除大文件 */
-  private removeLargeFile(bookId: string): void {
-    const filePath = join(this.booksDir, `${bookId}.txt`)
+  private removeBookContentFile(bookId: string): void {
+    const filePath = this.resolveLargeFilePath(bookId)
     if (existsSync(filePath)) {
       unlinkSync(filePath)
     }
   }
 
-  private removeLargeFileIfExists(bookId: string): void {
+  private removeBookContentFileIfExists(bookId: string): void {
     try {
-      this.removeLargeFile(bookId)
+      this.removeBookContentFile(bookId)
     } catch {
       // 回滚的主错误更重要；清理失败最多留下孤儿正文文件。
     }
@@ -493,14 +525,14 @@ export class BookshelfManager {
     }
   }
 
+  /**
+   * 定位 offset 所属的章节下标。
+   *
+   * 委托给共享的二分实现：搜索正文时每个命中都要调用一次，线性回扫
+   * 会让「5000 章的小说搜一个常见字」退化成几十万次比较。
+   */
   private getChapterIndexForOffset(chapters: Chapter[], offset: number): number {
-    if (chapters.length === 0) return 0
-    for (let i = chapters.length - 1; i >= 0; i--) {
-      if (offset >= chapters[i].offset) {
-        return i
-      }
-    }
-    return 0
+    return findChapterIndexForOffset(chapters, offset)
   }
 
   private assertBackup(value: unknown): asserts value is MoyuBackup {
@@ -526,6 +558,12 @@ export class BookshelfManager {
       ) {
         throw new TypeError('Invalid backup file')
       }
+
+      // 备份文件可能来自任何地方，id 会参与拼接正文文件路径，必须先校验，
+      // 避免 restoreBackup 中途才失败并留下写了一半的书架状态。
+      if (!isSafeBookId(meta.id)) {
+        throw new TypeError('Invalid backup file')
+      }
     }
   }
 
@@ -533,14 +571,14 @@ export class BookshelfManager {
    * 兼容旧版本：早期只保存了“第 N 章”，这里按 offset 回到原文行，
    * 补全成“第 N 章 标题”并标记卷/章/段类型。
    */
-  private hydrateStoredChapterTitles(books: BookMeta[]): { books: BookMeta[]; changed: boolean } {
+  private hydrateStoredChapterTitles(books: BookMeta[]): HydratedBooksResult {
     let changed = false
+    const migrations: ChapterMigration[] = []
 
     const hydrated = books.map((book) => {
-      if (!book.chapters || book.chapters.length === 0) return book
-
       const content = this.getBookContentByMeta(book)
       if (!content) {
+        if (!book.chapters || book.chapters.length === 0) return book
         const typedChapters = book.chapters.map((chapter) => this.ensureChapterType(chapter))
         if (typedChapters.some((chapter, index) => chapter !== book.chapters[index])) {
           changed = true
@@ -549,11 +587,30 @@ export class BookshelfManager {
         return book
       }
 
+      // 解析规则升级后重建整本书的目录。旧版本只在 offset 上补全标题，
+      // 无法移除正文中的小数和编号列表，因此必须重新扫描原文。
+      if (book.chapterParserVersion !== CHAPTER_PARSER_VERSION) {
+        const reparsedChapters = this.chapterParser.parse(content)
+        changed = true
+        migrations.push({
+          bookId: book.id,
+          previousChapters: book.chapters ?? [],
+          nextChapters: reparsedChapters
+        })
+        return {
+          ...book,
+          chapters: reparsedChapters,
+          chapterParserVersion: CHAPTER_PARSER_VERSION
+        }
+      }
+
+      if (!book.chapters || book.chapters.length === 0) return book
+
       let bookChanged = false
       const chapters = book.chapters.map((chapter) => {
         const lineTitle = this.getLineTitleAtOffset(content, chapter.offset)
         const title = lineTitle && lineTitle.startsWith(chapter.title) ? lineTitle : chapter.title
-        const type = this.getChapterType(title)
+        const type = getChapterType(title)
 
         if (title !== chapter.title || type !== chapter.type) {
           bookChanged = true
@@ -567,22 +624,98 @@ export class BookshelfManager {
       return { ...book, chapters }
     })
 
-    return { books: hydrated, changed }
+    return { books: hydrated, changed, migrations }
+  }
+
+  /** 将旧目录中的进度和书签按字符 offset 映射到新目录，避免升级后跳错章节。 */
+  private migrateChapterReferences(migrations: ChapterMigration[]): void {
+    if (migrations.length === 0) return
+
+    const progress = this.store.get('progress', {})
+    const bookmarks = this.store.get('bookmarks', {})
+    let progressChanged = false
+    let bookmarksChanged = false
+
+    for (const migration of migrations) {
+      const savedProgress = progress[migration.bookId]
+      if (savedProgress) {
+        const chapterIndex = this.remapChapterIndex(
+          savedProgress.chapterIndex,
+          migration.previousChapters,
+          migration.nextChapters
+        )
+        if (chapterIndex !== savedProgress.chapterIndex) {
+          progress[migration.bookId] = { ...savedProgress, chapterIndex }
+          progressChanged = true
+        }
+      }
+
+      const savedBookmarks = bookmarks[migration.bookId]
+      if (savedBookmarks?.length) {
+        const nextBookmarks = savedBookmarks.map((bookmark) => {
+          const chapterIndex = this.remapChapterIndex(
+            bookmark.chapterIndex,
+            migration.previousChapters,
+            migration.nextChapters
+          )
+          if (chapterIndex === bookmark.chapterIndex) return bookmark
+          bookmarksChanged = true
+          return { ...bookmark, chapterIndex }
+        })
+        bookmarks[migration.bookId] = nextBookmarks
+      }
+    }
+
+    if (progressChanged) this.store.set('progress', progress)
+    if (bookmarksChanged) this.store.set('bookmarks', bookmarks)
+  }
+
+  private remapChapterIndex(index: number, previousChapters: Chapter[], nextChapters: Chapter[]): number {
+    if (nextChapters.length === 0) return 0
+
+    const previousIndex = Number.isInteger(index)
+      ? Math.max(0, Math.min(index, Math.max(previousChapters.length - 1, 0)))
+      : 0
+    const previousChapter = previousChapters[previousIndex]
+    if (!previousChapter) return 0
+    return this.getChapterIndexForOffset(nextChapters, previousChapter.offset)
   }
 
   private ensureChapterType(chapter: Chapter): Chapter {
-    const type = this.getChapterType(chapter.title)
+    const type = getChapterType(chapter.title)
     if (chapter.type === type) return chapter
     return { ...chapter, type }
   }
 
-  private getBookContentByMeta(book: BookMeta): string | null {
-    if (book.fileSize > LARGE_FILE_THRESHOLD) {
-      return this.readLargeFile(book.id)
-    }
+  /**
+   * 读取书籍正文。
+   *
+   * 正文现在一律存成独立文件；旧版本把小于 5MB 的正文内联在 electron-store 的
+   * fileContents 里，这里保留读取回退，并在读到旧数据时就地迁移成文件，
+   * 迁移成功后从 store 中移除，避免旧数据长期占着 JSON。
+   */
+  private readBookContent(book: BookMeta): string | null {
+    const fromFile = this.readBookContentFile(book.id)
+    if (fromFile !== null) return fromFile
 
     const fileContents = this.store.get('fileContents', {})
-    return fileContents[book.id] ?? null
+    const legacyContent = fileContents[book.id]
+    if (legacyContent === undefined) return null
+
+    // 首次读到旧数据时迁移到文件，失败也不影响本次阅读。
+    try {
+      this.writeBookContentFile(book.id, legacyContent)
+      delete fileContents[book.id]
+      this.store.set('fileContents', fileContents)
+    } catch {
+      // 迁移失败时保留内联数据，下次读取再试。
+    }
+
+    return legacyContent
+  }
+
+  private getBookContentByMeta(book: BookMeta): string | null {
+    return this.readBookContent(book)
   }
 
   private getLineTitleAtOffset(content: string, offset: number): string | null {
@@ -593,12 +726,12 @@ export class BookshelfManager {
     const title = rawLine.trim()
     return title.length > 0 ? title : null
   }
+}
 
-  private getChapterType(title: string): Chapter['type'] {
-    if (/^第[一二三四五六七八九十百千万零\d]+[卷部集篇]|^卷[一二三四五六七八九十百千万零\d]+|^Volume\s*\d+|^Part\s*\d+/i.test(title)) {
-      return 'volume'
-    }
-    if (/^第\s*\d+\s*段/.test(title)) return 'section'
-    return 'chapter'
-  }
+/**
+ * 书籍 ID 必须是不含路径分隔符的安全标识。
+ * 正常 ID 由 randomUUID() 生成；这里同时兼容测试与旧数据里的简单字符串。
+ */
+function isSafeBookId(id: string): boolean {
+  return id.length > 0 && id.length <= 200 && /^[A-Za-z0-9._-]+$/.test(id) && !id.includes('..')
 }

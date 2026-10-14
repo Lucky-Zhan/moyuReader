@@ -1,8 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ReaderView } from '../../src/renderer/src/components/ReaderView'
 import type { Chapter, ReadingProgress } from '../../src/shared/types'
 import { createMockApi } from './mock-api'
+import {
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_LINE_HEIGHT,
+  FONT_SIZE_MIN,
+  FONT_SIZE_STEP,
+  LINE_HEIGHT_STEP
+} from '../../src/shared/constants'
+
+/** 字号断言跟随常量，避免默认值调整后测试与实现脱节。 */
+const atSize = (delta: number): string => `${DEFAULT_FONT_SIZE + delta}px`
 
 // Mock window.api
 beforeEach(() => {
@@ -45,6 +56,84 @@ describe('ReaderView', () => {
     const contentArea = screen.getByRole('document')
     expect(contentArea).toBeDefined()
     expect(contentArea.textContent).toContain('Line 1')
+  })
+
+  it('renders each non-empty line as its own paragraph', () => {
+    render(
+      <ReaderView
+        content={'第一段\n第二段\n\n第四段\r\n第五段'}
+        chapters={sampleChapters}
+        progress={defaultProgress}
+        onProgressChange={vi.fn()}
+        onBack={vi.fn()}
+      />
+    )
+
+    const paragraphs = screen.getByRole('document').querySelectorAll('.reader-paragraph')
+    // 空行不产生段落节点，CRLF 也要正确剥离。
+    expect(Array.from(paragraphs).map((node) => node.textContent)).toEqual([
+      '第一段',
+      '第二段',
+      '第四段',
+      '第五段'
+    ])
+  })
+
+  it('keeps paragraph markup inside each loaded chapter block', async () => {
+    const nextChapter: ChapterContent = {
+      bookId: 'book-1',
+      chapterIndex: 1,
+      title: '第二章',
+      content: '第二章\n下一段正文',
+      offset: 1500,
+      length: 1500,
+      totalLength: 3000,
+      totalChapters: 2
+    }
+    const onLoadChapterContent = vi.fn().mockResolvedValue(nextChapter)
+
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      value: 1000
+    })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      value: 500
+    })
+
+    render(
+      <ReaderView
+        content={sampleContent}
+        chapterContent={{
+          bookId: 'book-1',
+          chapterIndex: 0,
+          title: '第一章',
+          content: '第一章\n本章正文',
+          offset: 0,
+          length: 1500,
+          totalLength: 3000,
+          totalChapters: 2
+        }}
+        chapters={sampleChapters}
+        progress={defaultProgress}
+        onProgressChange={vi.fn()}
+        onBack={vi.fn()}
+        onLoadChapterContent={onLoadChapterContent}
+      />
+    )
+
+    const contentArea = screen.getByRole('document') as HTMLDivElement
+    contentArea.scrollTop = 470
+    fireEvent.scroll(contentArea)
+
+    await waitFor(() => {
+      expect(onLoadChapterContent).toHaveBeenCalledWith(1)
+    })
+
+    const blocks = contentArea.querySelectorAll('.reader-chapter-block')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].querySelectorAll('.reader-paragraph')).toHaveLength(2)
+    expect(blocks[1].querySelectorAll('.reader-paragraph')).toHaveLength(2)
   })
 
   it('displays progress percentage in status bar', () => {
@@ -130,6 +219,72 @@ describe('ReaderView', () => {
     expect(toolbarDrawer.open).toBe(false)
   })
 
+  it('automatically collapses the full toolbar after the pointer leaves the top zone', () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <ReaderView
+          content={sampleContent}
+          chapters={sampleChapters}
+          progress={defaultProgress}
+          onProgressChange={vi.fn()}
+          onBack={vi.fn()}
+        />
+      )
+
+      const toolbarDrawer = document.querySelector('.reader-toolbar-drawer') as HTMLDetailsElement
+      fireEvent.mouseMove(window, { clientY: 16 })
+      expect(toolbarDrawer.open).toBe(true)
+
+      fireEvent.mouseMove(window, { clientY: 240 })
+      act(() => {
+        vi.advanceTimersByTime(160)
+      })
+      expect(toolbarDrawer.open).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('closes an open popover and toolbar together on Escape', () => {
+    render(
+      <ReaderView
+        content={sampleContent}
+        chapters={sampleChapters}
+        progress={defaultProgress}
+        onProgressChange={vi.fn()}
+        onBack={vi.fn()}
+      />
+    )
+
+    fireEvent.mouseMove(window, { clientY: 16 })
+    openFontSettings()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    const toolbarDrawer = document.querySelector('.reader-toolbar-drawer') as HTMLDetailsElement
+    const fontSettings = document.querySelector('.reader-font-settings') as HTMLDetailsElement
+    expect(toolbarDrawer.open).toBe(false)
+    expect(fontSettings.open).toBe(false)
+  })
+
+  it('collapses the toolbar immediately when the reader surface is clicked', () => {
+    render(
+      <ReaderView
+        content={sampleContent}
+        chapters={sampleChapters}
+        progress={defaultProgress}
+        onProgressChange={vi.fn()}
+        onBack={vi.fn()}
+      />
+    )
+
+    fireEvent.mouseMove(window, { clientY: 16 })
+    fireEvent.click(screen.getByRole('document'))
+
+    const toolbarDrawer = document.querySelector('.reader-toolbar-drawer') as HTMLDetailsElement
+    expect(toolbarDrawer.open).toBe(false)
+  })
+
   it('renders font size controls with default size', () => {
     const onProgressChange = vi.fn()
     const onBack = vi.fn()
@@ -145,8 +300,7 @@ describe('ReaderView', () => {
     )
 
     openFontSettings()
-    // Default font size is 16px
-    expect(screen.getByText('16px')).toBeDefined()
+    expect(screen.getByText(atSize(0))).toBeDefined()
   })
 
   it('increases font size when + button is clicked', () => {
@@ -167,9 +321,8 @@ describe('ReaderView', () => {
     const increaseBtn = screen.getByLabelText('增大字号')
     fireEvent.click(increaseBtn)
 
-    // Font size should increase by step (2px): 16 -> 18
-    expect(screen.getByText('18px')).toBeDefined()
-    expect(window.api.settings.setFontSize).toHaveBeenCalledWith(18)
+    expect(screen.getByText(atSize(FONT_SIZE_STEP))).toBeDefined()
+    expect(window.api.settings.setFontSize).toHaveBeenCalledWith(DEFAULT_FONT_SIZE + FONT_SIZE_STEP)
   })
 
   it('decreases font size when - button is clicked', () => {
@@ -190,12 +343,11 @@ describe('ReaderView', () => {
     const decreaseBtn = screen.getByLabelText('减小字号')
     fireEvent.click(decreaseBtn)
 
-    // Font size should decrease by step (2px): 16 -> 14
-    expect(screen.getByText('14px')).toBeDefined()
-    expect(window.api.settings.setFontSize).toHaveBeenCalledWith(14)
+    expect(screen.getByText(atSize(-FONT_SIZE_STEP))).toBeDefined()
+    expect(window.api.settings.setFontSize).toHaveBeenCalledWith(DEFAULT_FONT_SIZE - FONT_SIZE_STEP)
   })
 
-  it('disables decrease button at minimum font size (12px)', () => {
+  it('disables decrease button at the minimum font size', () => {
     const onProgressChange = vi.fn()
     const onBack = vi.fn()
 
@@ -211,11 +363,12 @@ describe('ReaderView', () => {
 
     openFontSettings()
     const decreaseBtn = screen.getByLabelText('减小字号')
-    // Click twice to go from 16 -> 14 -> 12
-    fireEvent.click(decreaseBtn)
-    fireEvent.click(decreaseBtn)
+    // 一直点到按钮禁用，这样不依赖默认字号与最小值的具体差值。
+    while (!(decreaseBtn as HTMLButtonElement).disabled) {
+      fireEvent.click(decreaseBtn)
+    }
 
-    expect(screen.getByText('12px')).toBeDefined()
+    expect(screen.getByText(`${FONT_SIZE_MIN}px`)).toBeDefined()
     expect(decreaseBtn).toHaveProperty('disabled', true)
   })
 
@@ -282,9 +435,11 @@ describe('ReaderView', () => {
 
     openFontSettings()
     const select = screen.getByLabelText('选择字体')
-    fireEvent.change(select, { target: { value: 'SimSun, serif' } })
+    // 选一个确实存在于下拉列表中的字体（SimSun, serif 已不在选项内）。
+    const target = 'Consolas, monospace'
+    fireEvent.change(select, { target: { value: target } })
 
-    expect(window.api.settings.setFontFamily).toHaveBeenCalledWith('SimSun, serif')
+    expect(window.api.settings.setFontFamily).toHaveBeenCalledWith(target)
   })
 
   it('handles ArrowDown key for page down', () => {
@@ -344,8 +499,8 @@ describe('ReaderView', () => {
     )
 
     const contentArea = screen.getByRole('document')
-    expect(contentArea.style.fontSize).toBe('16px')
-    expect(contentArea.style.fontFamily).toBe('Consolas, monospace')
+    expect(contentArea.style.fontSize).toBe(`${DEFAULT_FONT_SIZE}px`)
+    expect(contentArea.style.fontFamily).toBe(DEFAULT_FONT_FAMILY)
   })
 
   it('restores scroll position when progress changes', () => {
@@ -378,7 +533,7 @@ describe('ReaderView', () => {
     expect(screen.getByText('阅读进度：45%')).toBeDefined()
   })
 
-  it('does not force scrollTop again for progress emitted by scrolling', () => {
+  it('does not force scrollTop again for progress emitted by scrolling', async () => {
     const onProgressChange = vi.fn()
     const onBack = vi.fn()
 
@@ -405,6 +560,10 @@ describe('ReaderView', () => {
     contentArea.scrollTop = 120
     fireEvent.scroll(contentArea)
 
+    await waitFor(() => {
+      expect(onProgressChange).toHaveBeenCalled()
+    })
+
     const emittedProgress = onProgressChange.mock.calls.at(-1)?.[0] as ReadingProgress
     contentArea.scrollTop = 180
 
@@ -421,7 +580,64 @@ describe('ReaderView', () => {
     expect(contentArea.scrollTop).toBe(180)
   })
 
-  it('opens the next chapter when scrolling near the bottom', () => {
+  it('coalesces high-frequency scroll events into one animation frame', async () => {
+    const onProgressChange = vi.fn()
+    const onBack = vi.fn()
+    const callbacks: FrameRequestCallback[] = []
+    const originalRequestAnimationFrame = window.requestAnimationFrame
+    const originalCancelAnimationFrame = window.cancelAnimationFrame
+    let frameId = 0
+
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        callbacks.push(callback)
+        frameId += 1
+        return frameId
+      }
+    })
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+      configurable: true,
+      value: vi.fn()
+    })
+
+    try {
+      render(
+        <ReaderView
+          content={sampleContent}
+          chapters={sampleChapters}
+          progress={defaultProgress}
+          onProgressChange={onProgressChange}
+          onBack={onBack}
+        />
+      )
+
+      const contentArea = screen.getByRole('document')
+      fireEvent.scroll(contentArea)
+      fireEvent.scroll(contentArea)
+
+      expect(callbacks).toHaveLength(1)
+      expect(onProgressChange).not.toHaveBeenCalled()
+
+      act(() => {
+        callbacks[0](0)
+      })
+      await waitFor(() => {
+        expect(onProgressChange).toHaveBeenCalledTimes(1)
+      })
+    } finally {
+      Object.defineProperty(window, 'requestAnimationFrame', {
+        configurable: true,
+        value: originalRequestAnimationFrame
+      })
+      Object.defineProperty(window, 'cancelAnimationFrame', {
+        configurable: true,
+        value: originalCancelAnimationFrame
+      })
+    }
+  })
+
+  it('opens the next chapter when scrolling near the bottom', async () => {
     const onSelectChapter = vi.fn()
 
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
@@ -459,6 +675,9 @@ describe('ReaderView', () => {
     fireEvent.scroll(contentArea)
     fireEvent.scroll(contentArea)
 
+    await waitFor(() => {
+      expect(onSelectChapter).toHaveBeenCalledTimes(1)
+    })
     expect(onSelectChapter).toHaveBeenCalledTimes(1)
     expect(onSelectChapter).toHaveBeenCalledWith(1)
   })
@@ -550,7 +769,9 @@ describe('ReaderView', () => {
 
     await waitFor(() => {
       expect(onLoadChapterContent).toHaveBeenCalledWith(1)
-      expect(contentArea.textContent).toContain('第二章\n下一段正文')
+      // 正文按段落渲染：换行不再是同一文本节点里的 \n，而是独立的 <p>。
+      expect(contentArea.textContent).toContain('第二章')
+      expect(contentArea.textContent).toContain('下一段正文')
     })
   })
 
@@ -603,7 +824,8 @@ describe('ReaderView', () => {
 
     await waitFor(() => {
       expect(onLoadChapterContent).toHaveBeenCalledWith(0)
-      expect(contentArea.textContent).toContain('第一章\n上一段正文')
+      expect(contentArea.textContent).toContain('第一章')
+      expect(contentArea.textContent).toContain('上一段正文')
     })
   })
 
@@ -626,8 +848,10 @@ describe('ReaderView', () => {
     fireEvent.click(increaseBtn)
 
     const contentArea = screen.getByRole('document')
-    expect(contentArea.style.lineHeight).toBe('2')
-    expect(window.api.settings.setLineHeight).toHaveBeenCalledWith(2)
+    // 行距按步长递增；用常量推导，避免默认值变化后断言失效。
+    const expected = Number((DEFAULT_LINE_HEIGHT + LINE_HEIGHT_STEP).toFixed(1))
+    expect(Number(contentArea.style.lineHeight)).toBeCloseTo(expected, 5)
+    expect(window.api.settings.setLineHeight).toHaveBeenCalledWith(expected)
   })
 
   it('submits search queries and opens selected search results', () => {

@@ -1,9 +1,12 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import App from '../../src/renderer/src/App'
 import {
   AUTO_SAVE_INTERVAL,
-  DEFAULT_HIDE_SHORTCUT
+  DEFAULT_HIDE_SHORTCUT,
+  DEFAULT_MOUSE_LEAVE_ACTION,
+  DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+  DEFAULT_MOUSE_RETURN_DELAY
 } from '../../src/shared/constants'
 import type { MoyuApi } from '../../src/shared/moyu-api'
 import type { BookMeta, ReaderOpenResult } from '../../src/shared/types'
@@ -16,6 +19,9 @@ const defaultSettings = {
   disguiseTheme: 'dark' as const,
   stealthEnabled: true,
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
+  mouseLeaveAction: DEFAULT_MOUSE_LEAVE_ACTION,
+  mouseLeaveDelay: DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+  mouseReturnDelay: DEFAULT_MOUSE_RETURN_DELAY,
   autoSaveInterval: AUTO_SAVE_INTERVAL
 }
 
@@ -56,7 +62,7 @@ function createOpenResult(overrides?: Partial<ReaderOpenResult>): ReaderOpenResu
 beforeEach(() => {
   api = createMockApi()
   vi.mocked(api.settings.get).mockResolvedValue(defaultSettings)
-  vi.mocked(api.bookshelf.getAll).mockResolvedValue([defaultBook])
+  vi.mocked(api.bookshelf.getLibrary).mockResolvedValue([{ book: defaultBook, progress: null }])
   vi.mocked(api.reader.open).mockResolvedValue(createOpenResult())
   window.api = api
 })
@@ -92,7 +98,9 @@ describe('App reading progress behavior', () => {
         { title: '第二章', offset: 20, length: 20 }
       ]
     }
-    vi.mocked(api.bookshelf.getAll).mockResolvedValue([bookWithTwoChapters])
+    vi.mocked(api.bookshelf.getLibrary).mockResolvedValue([
+      { book: bookWithTwoChapters, progress: null }
+    ])
     vi.mocked(api.reader.open).mockResolvedValue(createOpenResult({
       book: bookWithTwoChapters,
       chapterContent: {
@@ -121,12 +129,17 @@ describe('App reading progress behavior', () => {
 
     await screen.findByText('测试小说')
     fireEvent.click(screen.getByText('测试小说'))
-    await screen.findByText('第一章')
+    fireEvent.click(await screen.findByLabelText('显示目录'))
+    // 正文已按段落渲染，"第一章" 会同时出现在目录和正文里，
+    // 因此这里限定在目录抽屉内查找。
+    const chapterDrawer = await screen.findByRole('dialog')
+    expect(within(chapterDrawer).getByText('第一章')).toBeDefined()
 
-    fireEvent.click(screen.getByText('第二章'))
+    fireEvent.click(within(chapterDrawer).getByText('第二章'))
 
     await waitFor(() => {
-      expect(screen.getByRole('document').textContent).toContain('第二章\n新的正文')
+      expect(screen.getByRole('document').textContent).toContain('第二章')
+      expect(screen.getByRole('document').textContent).toContain('新的正文')
     })
     expect(api.reader.getChapterContent).toHaveBeenCalledWith('book-1', 1)
     expect(api.bookshelf.updateProgress).toHaveBeenCalledWith('book-1', {
@@ -229,7 +242,7 @@ describe('App theme behavior', () => {
       ...defaultSettings,
       disguiseTheme: 'paper'
     })
-    vi.mocked(api.bookshelf.getAll).mockResolvedValue([])
+    vi.mocked(api.bookshelf.getLibrary).mockResolvedValue([])
 
     render(<App />)
 
@@ -270,6 +283,54 @@ describe('App theme behavior', () => {
     vi.mocked(api.stealth.mouseLeave).mockClear()
     fireEvent.mouseLeave(document.querySelector('.app')!)
     expect(api.stealth.mouseLeave).not.toHaveBeenCalled()
+  })
+
+  it('persists stealth mouse leave behavior and delay changes', async () => {
+    render(<App />)
+
+    await screen.findByLabelText('阅读设置')
+    fireEvent.click(screen.getByLabelText('阅读设置'))
+    fireEvent.change(screen.getByLabelText('鼠标移出行为'), {
+      target: { value: 'hide' }
+    })
+    fireEvent.change(screen.getByLabelText('延迟秒数'), {
+      target: { value: '7000' }
+    })
+    fireEvent.change(screen.getByLabelText('显形延迟秒数'), {
+      target: { value: '3000' }
+    })
+
+    await waitFor(() => {
+      expect(api.settings.setMouseLeaveAction).toHaveBeenCalledWith('hide')
+      expect(api.settings.setMouseLeaveDelay).toHaveBeenCalledWith(7000)
+      expect(api.settings.setMouseReturnDelay).toHaveBeenCalledWith(3000)
+    })
+  })
+
+  it('starts window dragging from blank reader chrome without hijacking controls', async () => {
+    render(<App />)
+
+    await screen.findByText('测试小说')
+    fireEvent.click(screen.getByText('测试小说'))
+    const toolbar = await screen.findByRole('toolbar', { name: '阅读工具栏' })
+    toolbar.dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientY: 20,
+      screenX: 240,
+      screenY: 20
+    }))
+
+    expect(api.window.drag.start).toHaveBeenCalledOnce()
+
+    screen.getByLabelText('返回').dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientY: 20,
+      screenX: 240,
+      screenY: 20
+    }))
+    expect(api.window.drag.start).toHaveBeenCalledOnce()
   })
 
   it('forwards native window focus changes to stealth tracking', async () => {

@@ -1,7 +1,12 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
 import type { BookshelfManager } from './bookshelf-manager'
-import type { BookmarkInput, ReadingProgress, DisguiseTheme } from '../shared/types'
+import type {
+  BookmarkInput,
+  ReadingProgress,
+  DisguiseTheme,
+  MouseLeaveAction
+} from '../shared/types'
 import type { SettingsManager } from './settings-manager'
 import type { StealthModeManager } from './stealth-mode-manager'
 import {
@@ -12,7 +17,13 @@ import {
   LINE_HEIGHT_MAX,
   LINE_HEIGHT_MIN,
   LINE_HEIGHT_STEP,
-  MAX_TITLE_LENGTH
+  MAX_TITLE_LENGTH,
+  MOUSE_LEAVE_DELAY_MIN,
+  MOUSE_LEAVE_DELAY_MAX,
+  MOUSE_LEAVE_DELAY_STEP,
+  MOUSE_RETURN_DELAY_MIN,
+  MOUSE_RETURN_DELAY_MAX,
+  MOUSE_RETURN_DELAY_STEP
 } from '../shared/constants'
 import { assertTrustedIpcSender, type IpcSenderValidator } from './ipc-security'
 
@@ -22,11 +33,17 @@ import { assertTrustedIpcSender, type IpcSenderValidator } from './ipc-security'
  */
 export function registerBookshelfHandlers(
   bookshelfManager: BookshelfManager,
-  isTrustedSender: IpcSenderValidator
+  isTrustedSender: IpcSenderValidator,
+  onProgressReported?: (bookId: string, progress: ReadingProgress) => void
 ): void {
   ipcMain.handle(IPC_CHANNELS.BOOKSHELF_GET_ALL, (event) => {
     assertTrustedIpcSender(event, isTrustedSender)
     return bookshelfManager.getAllBooks()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.BOOKSHELF_GET_LIBRARY, (event) => {
+    assertTrustedIpcSender(event, isTrustedSender)
+    return bookshelfManager.getLibrary()
   })
 
   ipcMain.handle(IPC_CHANNELS.BOOKSHELF_REMOVE, (event, bookId: unknown) => {
@@ -42,6 +59,8 @@ export function registerBookshelfHandlers(
       assertBookId(bookId)
       assertReadingProgress(progress)
       bookshelfManager.updateProgress(bookId, progress)
+      // 让主进程缓存“最近上报的阅读位置”，供 AutoSaveManager 定时兜底落盘。
+      onProgressReported?.(bookId, progress)
     }
   )
 
@@ -117,7 +136,12 @@ export function registerBookshelfHandlers(
 export function registerSettingsHandlers(
   settingsManager: SettingsManager,
   isTrustedSender: IpcSenderValidator,
-  onStealthEnabledChange?: (enabled: boolean) => void
+  onStealthEnabledChange?: (enabled: boolean) => void,
+  onMouseLeaveConfigChange?: (config: {
+    mouseLeaveAction?: MouseLeaveAction
+    mouseLeaveDelay?: number
+    mouseReturnDelay?: number
+  }) => void
 ): void {
   ipcMain.handle(IPC_CHANNELS.SETTINGS_GET, (event) => {
     assertTrustedIpcSender(event, isTrustedSender)
@@ -168,6 +192,39 @@ export function registerSettingsHandlers(
     }
     settingsManager.setStealthEnabled(enabled)
     onStealthEnabledChange?.(enabled)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_ACTION, (event, action: unknown) => {
+    assertTrustedIpcSender(event, isTrustedSender)
+    assertMouseLeaveAction(action)
+    settingsManager.setMouseLeaveAction(action)
+    onMouseLeaveConfigChange?.({ mouseLeaveAction: action })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_DELAY, (event, delay: unknown) => {
+    assertTrustedIpcSender(event, isTrustedSender)
+    assertNumberInStepRange(
+      delay,
+      MOUSE_LEAVE_DELAY_MIN,
+      MOUSE_LEAVE_DELAY_MAX,
+      MOUSE_LEAVE_DELAY_STEP,
+      'mouse leave delay'
+    )
+    settingsManager.setMouseLeaveDelay(delay)
+    onMouseLeaveConfigChange?.({ mouseLeaveDelay: delay })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_MOUSE_RETURN_DELAY, (event, delay: unknown) => {
+    assertTrustedIpcSender(event, isTrustedSender)
+    assertNumberInStepRange(
+      delay,
+      MOUSE_RETURN_DELAY_MIN,
+      MOUSE_RETURN_DELAY_MAX,
+      MOUSE_RETURN_DELAY_STEP,
+      'mouse return delay'
+    )
+    settingsManager.setMouseReturnDelay(delay)
+    onMouseLeaveConfigChange?.({ mouseReturnDelay: delay })
   })
 }
 
@@ -291,6 +348,12 @@ function assertNumberInStepRange(
 
 function isDisguiseTheme(value: unknown): value is DisguiseTheme {
   return value === 'dark' || value === 'light' || value === 'paper' || value === 'code' || value === 'terminal'
+}
+
+function assertMouseLeaveAction(value: unknown): asserts value is MouseLeaveAction {
+  if (value !== 'hide' && value !== 'quit' && value !== 'deferred-quit') {
+    throw new TypeError('Invalid mouse leave action')
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

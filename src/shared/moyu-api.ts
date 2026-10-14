@@ -6,9 +6,11 @@ import type {
   BookMeta,
   ChapterContent,
   DisguiseTheme,
+  LibraryItem,
   ReaderOpenResult,
   ReadingProgress,
-  SearchResult
+  SearchResult,
+  MouseLeaveAction
 } from './types'
 
 export interface FileImportResult {
@@ -39,12 +41,21 @@ export type Unsubscribe = () => void
  * 每个方法固定映射到一个 IPC 通道，避免暴露任意 invoke/on 能力。
  */
 export interface MoyuApi {
+  window: {
+    drag: {
+      start(): Promise<void>
+      moveBy(deltaX: number, deltaY: number): Promise<void>
+      end(): Promise<void>
+    }
+  }
   file: {
     import(): Promise<FileImportResult | null>
     importMany(): Promise<BookImportResult[]>
   }
   bookshelf: {
     getAll(): Promise<BookMeta[]>
+    /** 书架条目（书籍 + 进度），一次 IPC 返回，避免逐本查询进度 */
+    getLibrary(): Promise<LibraryItem[]>
     remove(bookId: string): Promise<void>
     updateProgress(bookId: string, progress: ReadingProgress): Promise<void>
     getProgress(bookId: string): Promise<ReadingProgress | null>
@@ -72,6 +83,9 @@ export interface MoyuApi {
     setLineHeight(lineHeight: number): Promise<void>
     setDisguiseTheme(theme: DisguiseTheme): Promise<void>
     setStealthEnabled(enabled: boolean): Promise<void>
+    setMouseLeaveAction(action: MouseLeaveAction): Promise<void>
+    setMouseLeaveDelay(delay: number): Promise<void>
+    setMouseReturnDelay(delay: number): Promise<void>
   }
   stealth: {
     setDisguise(theme: DisguiseTheme): Promise<void>

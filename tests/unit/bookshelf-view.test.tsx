@@ -25,17 +25,19 @@ function createBook(id: string, title: string, fileSize = 100): BookMeta {
   }
 }
 
-function mockBookshelfProgress(percentage = 0): void {
-  vi.mocked(api.bookshelf.getProgress).mockResolvedValue({
-    chapterIndex: 0,
-    scrollPosition: 0,
-    percentage
-  })
+/** 让 getLibrary 返回带进度的书架条目（组件现在一次拿到书籍 + 进度）。 */
+function mockLibrary(books: BookMeta[], percentage = 0): void {
+  vi.mocked(api.bookshelf.getLibrary).mockResolvedValue(
+    books.map((book) => ({
+      book,
+      progress: { chapterIndex: 0, scrollPosition: 0, percentage }
+    }))
+  )
 }
 
 describe('BookshelfView', () => {
   it('shows empty state when no books', async () => {
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([])
+    mockLibrary([])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -45,11 +47,10 @@ describe('BookshelfView', () => {
   })
 
   it('renders book list with titles and progress', async () => {
-    mockBookshelfProgress(37)
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+    mockLibrary([
       createBook('1', '测试小说'),
       createBook('2', '另一本书', 200)
-    ])
+    ], 37)
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -61,9 +62,8 @@ describe('BookshelfView', () => {
   })
 
   it('truncates long titles to 50 characters with ellipsis', async () => {
-    mockBookshelfProgress()
     const longTitle = 'A'.repeat(60)
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([createBook('1', longTitle)])
+    mockLibrary([createBook('1', longTitle)])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -74,8 +74,7 @@ describe('BookshelfView', () => {
   })
 
   it('calls onOpenBook when clicking a book', async () => {
-    mockBookshelfProgress()
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+    mockLibrary([
       createBook('book-1', '点击测试')
     ])
     const onOpenBook = vi.fn()
@@ -91,8 +90,7 @@ describe('BookshelfView', () => {
   })
 
   it('shows delete confirmation dialog', async () => {
-    mockBookshelfProgress()
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+    mockLibrary([
       createBook('book-1', '删除测试')
     ])
 
@@ -102,14 +100,15 @@ describe('BookshelfView', () => {
       expect(screen.getByText('删除测试')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByText('删除'))
+    fireEvent.click(screen.getByLabelText(/^删除《/))
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
+    expect(screen.getByText('删除《删除测试》？')).toBeTruthy()
     expect(screen.getByText('确定要删除这本小说吗？删除后将无法恢复。')).toBeTruthy()
   })
 
   it('calls bookshelf.remove on confirm delete', async () => {
-    mockBookshelfProgress()
-    vi.mocked(api.bookshelf.getAll)
-      .mockResolvedValueOnce([createBook('book-1', '删除确认')])
+    vi.mocked(api.bookshelf.getLibrary)
+      .mockResolvedValueOnce([{ book: createBook('book-1', '删除确认'), progress: null }])
       .mockResolvedValueOnce([])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
@@ -118,7 +117,7 @@ describe('BookshelfView', () => {
       expect(screen.getByText('删除确认')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByText('删除'))
+    fireEvent.click(screen.getByLabelText(/^删除《/))
     fireEvent.click(screen.getByText('确认删除'))
 
     await waitFor(() => {
@@ -127,8 +126,7 @@ describe('BookshelfView', () => {
   })
 
   it('cancels delete when clicking cancel', async () => {
-    mockBookshelfProgress()
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+    mockLibrary([
       createBook('book-1', '取消删除')
     ])
 
@@ -138,7 +136,7 @@ describe('BookshelfView', () => {
       expect(screen.getByText('取消删除')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByText('删除'))
+    fireEvent.click(screen.getByLabelText(/^删除《/))
     expect(screen.getByText('确定要删除这本小说吗？删除后将无法恢复。')).toBeTruthy()
 
     fireEvent.click(screen.getByText('取消'))
@@ -146,8 +144,7 @@ describe('BookshelfView', () => {
   })
 
   it('enables inline edit on edit button click', async () => {
-    mockBookshelfProgress()
-    vi.mocked(api.bookshelf.getAll).mockResolvedValueOnce([
+    mockLibrary([
       createBook('book-1', '编辑测试')
     ])
 
@@ -157,7 +154,7 @@ describe('BookshelfView', () => {
       expect(screen.getByText('编辑测试')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByText('编辑'))
+    fireEvent.click(screen.getByLabelText(/^重命名《/))
 
     const input = screen.getByDisplayValue('编辑测试') as HTMLInputElement
     expect(input).toBeTruthy()
@@ -165,10 +162,9 @@ describe('BookshelfView', () => {
   })
 
   it('saves edited title on Enter key', async () => {
-    mockBookshelfProgress()
-    vi.mocked(api.bookshelf.getAll)
-      .mockResolvedValueOnce([createBook('book-1', '旧书名')])
-      .mockResolvedValueOnce([createBook('book-1', '新书名')])
+    vi.mocked(api.bookshelf.getLibrary)
+      .mockResolvedValueOnce([{ book: createBook('book-1', '旧书名'), progress: null }])
+      .mockResolvedValueOnce([{ book: createBook('book-1', '新书名'), progress: null }])
 
     render(<BookshelfView onOpenBook={vi.fn()} />)
 
@@ -176,7 +172,7 @@ describe('BookshelfView', () => {
       expect(screen.getByText('旧书名')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByText('编辑'))
+    fireEvent.click(screen.getByLabelText(/^重命名《/))
 
     const input = screen.getByDisplayValue('旧书名')
     fireEvent.change(input, { target: { value: '新书名' } })
@@ -188,7 +184,7 @@ describe('BookshelfView', () => {
   })
 
   it('calls file.importMany when import button is clicked', async () => {
-    vi.mocked(api.bookshelf.getAll)
+    vi.mocked(api.bookshelf.getLibrary)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
     vi.mocked(api.file.importMany).mockResolvedValueOnce([{ success: true }])
@@ -207,8 +203,8 @@ describe('BookshelfView', () => {
     })
   })
 
-  it('exports and restores backups from the bookshelf header', async () => {
-    vi.mocked(api.bookshelf.getAll)
+  it('exports and restores backups from the sidebar', async () => {
+    vi.mocked(api.bookshelf.getLibrary)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
     vi.mocked(api.backup.export).mockResolvedValueOnce({ success: true })
@@ -220,8 +216,8 @@ describe('BookshelfView', () => {
       expect(screen.getByText('书架为空，请导入小说')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByText('备份'))
-    fireEvent.click(screen.getByText('恢复'))
+    fireEvent.click(screen.getByText('导出备份'))
+    fireEvent.click(screen.getByText('从备份恢复'))
 
     await waitFor(() => {
       expect(api.backup.export).toHaveBeenCalled()

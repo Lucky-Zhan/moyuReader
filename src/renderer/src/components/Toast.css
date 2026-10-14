@@ -5,15 +5,15 @@
   z-index: 9999;
   max-width: min(460px, calc(100vw - 32px));
   padding: 10px 15px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--menu-bg) 88%, transparent);
-  color: var(--text);
-  box-shadow: 0 16px 36px var(--shadow);
+  border: 1px solid color-mix(in srgb, var(--separator, var(--border)) 74%, transparent);
+  border-radius: var(--control-radius-lg, 14px);
+  background: var(--material-popover, var(--menu-bg));
+  color: var(--ink-primary, var(--text));
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--shadow) 72%, transparent);
   pointer-events: none;
   transform: translateX(-50%);
   backdrop-filter: blur(16px) saturate(140%);
-  transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+  transition: opacity var(--duration-popover) var(--ease-apple-out), transform var(--duration-popover) var(--ease-apple-out);
   @starting-style {
     opacity: 0;
     transform: translateX(-50%) translateY(8px) scale(0.97);
@@ -21,10 +21,13 @@
 }
 
 .toast-text {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
+  line-height: 1.45;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }

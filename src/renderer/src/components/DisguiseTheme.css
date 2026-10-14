@@ -1,191 +1,291 @@
-/* DisguiseTheme styles */
-
-/* Theme selector */
+/* Apple-like settings popover. Geometry is shared with the reader toolbar;
+ * themes only replace semantic colors below. */
 .disguise-theme-selector {
   position: relative;
+  display: inline-flex;
   margin-left: auto;
   -webkit-app-region: no-drag;
 }
 
 .disguise-theme-trigger {
-  display: flex;
+  position: relative;
+  display: inline-flex;
+  width: var(--control-height);
+  height: var(--control-height);
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 24px;
+  padding: 0;
   border: 1px solid transparent;
-  color: var(--muted);
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--ink-secondary, var(--muted));
   cursor: pointer;
-  list-style: none;
-  border-radius: 8px;
-  font-size: 13px;
-  letter-spacing: 0;
-  transition:
-    transform var(--motion-fast) var(--ease-out),
-    background-color var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+  outline: none;
+  transition: background-color var(--duration-press) var(--ease-apple-out),
+    border-color var(--duration-press) var(--ease-apple-out),
+    color var(--duration-press) var(--ease-apple-out),
+    transform var(--duration-press) var(--ease-apple-out);
 }
 
-.disguise-theme-trigger::-webkit-details-marker {
-  display: none;
+.disguise-theme-trigger:hover,
+.disguise-theme-trigger[aria-expanded='true'] {
+  background: var(--surface-control-hover, var(--hover-bg));
+  color: var(--ink-primary, var(--text));
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .disguise-theme-trigger:hover,
-  .disguise-theme-selector[open] .disguise-theme-trigger {
-    border-color: var(--border);
-    background: var(--hover-bg);
-    color: var(--text);
-  }
+.disguise-theme-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--tint, var(--accent)) 72%, transparent);
+  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--tint, var(--accent)) 30%, transparent);
+}
+
+.disguise-theme-trigger:active {
+  transform: scale(var(--control-press-scale));
 }
 
 .disguise-theme-menu {
-  position: absolute;
-  top: 26px;
+  top: calc(100% + 8px);
   right: 0;
-  z-index: 20;
-  min-width: 172px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--menu-bg);
-  box-shadow: 0 8px 20px var(--shadow);
-  backdrop-filter: blur(18px) saturate(145%);
-  animation: disguise-menu-in 160ms var(--ease-out) both;
+  min-width: 238px;
+  padding: 10px;
+  border-radius: var(--control-radius-lg);
+  font-family: var(--font-ui);
 }
 
 .disguise-theme-menu-separator {
   height: 1px;
-  margin: 6px 4px;
-  background: var(--border);
+  margin: 9px 2px;
+  background: color-mix(in srgb, var(--separator, var(--border)) 74%, transparent);
 }
 
 .disguise-theme-menu-label {
-  padding: 4px 8px 6px;
-  color: var(--muted);
-  font-size: 11px;
+  padding: 2px 8px 7px;
+  color: var(--ink-secondary, var(--muted));
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  letter-spacing: 0.02em;
 }
 
 .disguise-theme-btn {
-  display: block;
+  display: flex;
+  min-height: var(--control-height);
   width: 100%;
-  background: none;
-  border: none;
-  color: var(--text);
-  padding: 6px 8px;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius-sm);
+  background: transparent;
+  color: var(--ink-primary, var(--text));
   cursor: pointer;
-  font-size: 12px;
+  font: inherit;
+  font-size: var(--text-xs);
   text-align: left;
-  border-radius: 8px;
-  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
+  transition: background-color var(--duration-press) var(--ease-apple-out),
+    color var(--duration-press) var(--ease-apple-out),
+    transform var(--duration-press) var(--ease-apple-out);
+}
+
+.disguise-theme-btn:hover,
+.disguise-theme-toggle:hover {
+  background: var(--surface-control-hover, var(--hover-bg));
+}
+
+.disguise-theme-btn:active,
+.disguise-theme-toggle:active {
+  transform: scale(var(--control-press-scale));
 }
 
 .disguise-theme-btn.active {
-  background: var(--active-bg);
-  color: var(--active-text);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .disguise-theme-btn:hover,
-  .disguise-theme-toggle:hover {
-    background: var(--hover-bg);
-  }
-
-  .disguise-theme-btn:hover {
-    color: var(--text);
-  }
+  background: var(--surface-control-active, var(--active-bg));
+  color: var(--tint, var(--accent));
+  font-weight: 650;
 }
 
 .disguise-theme-toggle {
   display: flex;
+  min-height: var(--control-height);
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
-  color: var(--text);
+  padding: 0 9px;
+  border-radius: var(--control-radius-sm);
+  color: var(--ink-primary, var(--text));
   cursor: pointer;
-  border-radius: 8px;
-  font-size: 12px;
-  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+  font: inherit;
+  font-size: var(--text-xs);
+  transition: background-color var(--duration-press) var(--ease-apple-out), transform var(--duration-press) var(--ease-apple-out);
 }
 
 .disguise-theme-toggle input {
-  accent-color: var(--accent);
+  position: relative;
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--separator, var(--border)) 76%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--separator, var(--border)) 58%, transparent);
+  accent-color: var(--tint, var(--accent));
+  cursor: pointer;
+  transition: background-color var(--duration-press) var(--ease-apple-out),
+    border-color var(--duration-press) var(--ease-apple-out);
 }
 
-@keyframes disguise-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.disguise-theme-toggle input::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface-elevated, var(--panel-bg-strong));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 32%, transparent);
+  content: '';
+  transform: translateX(0);
+  transition: transform var(--duration-press) var(--ease-apple-out),
+    background-color var(--duration-press) var(--ease-apple-out);
+}
+
+.disguise-theme-toggle input:checked {
+  border-color: var(--tint, var(--accent));
+  background: var(--tint, var(--accent));
+}
+
+.disguise-theme-toggle input:checked::after {
+  background: #fff;
+  transform: translateX(14px);
+}
+
+.disguise-theme-toggle input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--tint, var(--accent)) 30%, transparent);
+}
+
+.disguise-stealth-settings {
+  display: grid;
+  gap: 8px;
+  padding: 1px 9px 3px;
+}
+
+.disguise-setting-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-secondary, var(--muted));
+  font-size: var(--text-2xs);
+}
+
+.disguise-setting-select {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--separator, var(--border)) 86%, transparent);
+  border-radius: var(--control-radius);
+  background: var(--surface-elevated, var(--panel-bg-strong));
+  color: var(--ink-primary, var(--text));
+  font: inherit;
+  font-size: var(--text-2xs);
+  outline: none;
+}
+
+.disguise-setting-select:focus-visible {
+  border-color: var(--tint, var(--accent));
+  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--tint, var(--accent)) 25%, transparent);
+}
+
+.disguise-setting-select:disabled,
+.disguise-setting-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.disguise-setting-value {
+  color: var(--ink-primary, var(--text));
+  font-variant-numeric: tabular-nums;
+}
+
+.disguise-setting-range {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  appearance: none;
+  accent-color: var(--tint, var(--accent));
+  cursor: pointer;
+}
+
+.disguise-setting-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--separator, var(--border)) 70%, transparent);
+}
+
+.disguise-setting-range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  appearance: none;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tint, var(--accent));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow) 30%, transparent);
+}
+
+.disguise-setting-range:focus-visible {
+  outline: none;
+}
+
+.disguise-setting-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--tint, var(--accent)) 30%, transparent),
+    0 1px 3px color-mix(in srgb, var(--shadow) 30%, transparent);
+}
+
+.disguise-setting-hint {
+  margin: 0;
+  color: var(--danger-ink, var(--danger));
+  font-size: var(--text-2xs);
+  line-height: 1.45;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .disguise-theme-menu {
-    animation: none;
+  .disguise-theme-trigger,
+  .disguise-theme-btn,
+  .disguise-theme-toggle,
+  .disguise-theme-toggle input,
+  .disguise-theme-toggle input::after { transition: none; }
+}
+
+@media (prefers-contrast: more) {
+  .disguise-theme-menu,
+  .disguise-setting-select {
+    border-color: var(--separator, var(--border));
   }
 }
 
-/* ===== 深色 ===== */
+/* ===== 深色 =====
+ * 中性灰蓝，最低视觉存在感，适合长时间阅读。
+ * 注意：不要再让它和 .theme-code 共用同一套色值——两者完全相同时切换主题
+ * 没有任何可见反馈。 */
 .theme-dark {
-  --app-bg: #1e1e1e;
-  --panel-bg: #252526;
-  --panel-bg-strong: #181818;
-  --menu-bg: #252526;
-  --text: #d4d4d4;
-  --muted: #858585;
-  --border: #3c3c3c;
-  --hover-bg: #2a2d2e;
-  --active-bg: #094771;
+  --app-bg: #1c1c1e;
+  --panel-bg: #242426;
+  --panel-bg-strong: #161618;
+  --menu-bg: #2a2a2d;
+  --text: #e3e3e6;
+  --muted: #98989f;
+  --border: #38383c;
+  --hover-bg: #2c2c30;
+  --active-bg: #2f3d55;
   --active-text: #ffffff;
-  --accent: #007acc;
-  --danger: #f48771;
-  --shadow: rgba(0, 0, 0, 0.35);
-  --accent-soft: rgba(0, 122, 204, 0.28);
-  --focus-ring: rgba(0, 122, 204, 0.3);
-  --ambient-glow: rgba(0, 122, 204, 0.11);
-  --topbar-bg: rgba(37, 37, 38, 0.84);
+  --accent: #5b9dff;
+  --danger: #ff6961;
+  --shadow: rgba(0, 0, 0, 0.42);
+  --accent-soft: rgba(91, 157, 255, 0.26);
+  --focus-ring: rgba(91, 157, 255, 0.34);
+  --ambient-glow: rgba(91, 157, 255, 0.13);
+  --topbar-bg: rgba(36, 36, 38, 0.86);
   background: var(--app-bg);
   color: var(--text);
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-}
-
-.theme-dark .reader-toolbar {
-  background: var(--panel-bg);
-  border-bottom: 1px solid var(--border);
-}
-
-.theme-dark .reader-status-bar {
-  background: color-mix(in srgb, var(--panel-bg) 82%, var(--accent) 18%);
-  color: var(--text);
-}
-
-/* ===== 浅色 ===== */
-.theme-light {
-  --app-bg: #f7f7f8;
-  --panel-bg: #ffffff;
-  --panel-bg-strong: #f0f1f3;
-  --menu-bg: #ffffff;
-  --text: #202124;
-  --muted: #6f747c;
-  --border: #d9dde3;
-  --hover-bg: #eceff3;
-  --active-bg: #dbeafe;
-  --active-text: #174ea6;
-  --accent: #3b73d9;
-  --danger: #c2410c;
-  --shadow: rgba(15, 23, 42, 0.16);
-  --accent-soft: rgba(59, 115, 217, 0.22);
-  --focus-ring: rgba(59, 115, 217, 0.28);
-  --ambient-glow: rgba(59, 115, 217, 0.1);
-  --topbar-bg: rgba(255, 255, 255, 0.84);
-  background: var(--app-bg);
-  color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-ui);
 }
 
 /* ===== 纸张 ===== */
@@ -209,66 +309,71 @@
   --topbar-bg: rgba(238, 226, 202, 0.86);
   background: var(--app-bg);
   color: var(--text);
-  font-family: 'Songti SC', SimSun, serif;
+  font-family: var(--font-reading);
 }
 
-/* ===== 代码编辑器伪装 ===== */
+/* ===== 代码编辑器伪装 =====
+ * 刻意贴近 VS Code Dark+：更冷的蓝灰底、等宽字体、状态栏使用 VS Code 的
+ * 品牌蓝。与「深色」主题保持明显差异，切换时能立刻看出变化。 */
 .theme-code {
-  --app-bg: #1e1e1e;
-  --panel-bg: #252526;
-  --panel-bg-strong: #181818;
-  --menu-bg: #252526;
+  --app-bg: #1f1f23;
+  --panel-bg: #26262b;
+  --panel-bg-strong: #17171a;
+  --menu-bg: #2b2b32;
   --text: #d4d4d4;
-  --muted: #858585;
-  --border: #3c3c3c;
-  --hover-bg: #2a2d2e;
-  --active-bg: #094771;
+  --muted: #8a8a94;
+  --border: #34343c;
+  --hover-bg: #2d2d35;
+  --active-bg: #0b3a5c;
   --active-text: #ffffff;
-  --accent: #007acc;
+  --accent: #3794ff;
   --danger: #f48771;
-  --shadow: rgba(0, 0, 0, 0.35);
-  --accent-soft: rgba(0, 122, 204, 0.28);
-  --focus-ring: rgba(0, 122, 204, 0.3);
-  --ambient-glow: rgba(0, 122, 204, 0.08);
-  --topbar-bg: rgba(37, 37, 38, 0.84);
+  --shadow: rgba(0, 0, 0, 0.46);
+  --accent-soft: rgba(55, 148, 255, 0.26);
+  --focus-ring: rgba(55, 148, 255, 0.34);
+  --ambient-glow: rgba(55, 148, 255, 0.07);
+  --topbar-bg: rgba(38, 38, 43, 0.88);
   background: var(--app-bg);
   color: var(--text);
-  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 
 .theme-code .app-topbar::before {
   content: 'EXPLORER  src/main.tsx  package.json';
   margin-right: auto;
   color: var(--muted);
-  font: 11px/1 'SF Mono', Consolas, Monaco, monospace;
+  font: 12px/1 var(--font-mono);
 }
 
-.theme-code .bookshelf-eyebrow,
-.theme-terminal .bookshelf-eyebrow {
+.theme-code .bookshelf-subtitle,
+.theme-terminal .bookshelf-subtitle {
   font-size: 0;
   letter-spacing: 0;
 }
 
-.theme-code .bookshelf-eyebrow::after {
+.theme-code .bookshelf-subtitle::after {
   content: 'WORKSPACE / FILES';
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
 }
 
 .theme-code .reader-content {
-  width: 100%;
-  max-width: none;
-  margin: 0;
   color: #d4d4d4;
-  background:
-    linear-gradient(90deg, #252526 0 52px, transparent 52px),
-    var(--app-bg);
-  padding-left: 72px;
-  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+  background: var(--app-bg);
+  font-family: var(--font-mono);
+}
+
+/* 代码伪装下正文是「代码」，段落缩进和段间距会立刻暴露这是小说。 */
+.theme-code .reader-paragraph {
+  text-indent: 0;
+}
+
+.theme-code .reader-paragraph + .reader-paragraph {
+  margin-top: 0.35em;
 }
 
 .theme-code .reader-content::selection {
-  background: rgba(0, 122, 204, 0.38);
+  background: rgba(55, 148, 255, 0.38);
 }
 
 /* ===== 终端伪装 ===== */
@@ -292,33 +397,68 @@
   --topbar-bg: rgba(11, 11, 11, 0.86);
   background: var(--app-bg);
   color: var(--text);
-  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 
 .theme-terminal .app-topbar::before {
   content: 'chaoranzhan@moyu:~/workspace $ tail -f app.log';
   margin-right: auto;
   color: var(--text);
-  font: 11px/1 'SF Mono', Consolas, Monaco, monospace;
+  font: 12px/1 var(--font-mono);
 }
 
-.theme-terminal .bookshelf-eyebrow::after {
+.theme-terminal .bookshelf-subtitle::after {
   content: '~/workspace';
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
 }
 
 .theme-terminal .reader-content {
-  width: 100%;
-  max-width: none;
-  margin: 0;
   background: #050505;
   color: #33ff66;
   text-shadow: 0 0 4px rgba(51, 255, 102, 0.28);
-  font-family: 'SF Mono', Consolas, Monaco, 'Courier New', monospace;
+  font-family: var(--font-mono);
+}
+
+/* 终端伪装下正文是日志输出，保持左对齐、行距紧凑。 */
+.theme-terminal .reader-paragraph {
+  text-indent: 0;
+}
+
+.theme-terminal .reader-paragraph + .reader-paragraph {
+  margin-top: 0.2em;
 }
 
 .theme-terminal .reader-content::before {
   content: '$ less current.log\A';
   color: var(--muted);
+}
+
+/* Lumina's light surface: quiet neutrals with one moss-green action color. */
+.theme-light {
+  --app-bg: #faf9fe;
+  --panel-bg: #f4f3f8;
+  --panel-bg-strong: #eeedf3;
+  --menu-bg: rgba(250, 249, 254, 0.96);
+  --text: #1a1b1f;
+  --muted: #5f6466;
+  --border: #c3c7c8;
+  --hover-bg: #e9e7ed;
+  --active-bg: #bceed3;
+  --active-text: #214f3b;
+  --accent: #3a6752;
+  --danger: #ba1a1a;
+  --shadow: rgba(26, 27, 31, 0.14);
+  --accent-soft: rgba(58, 103, 82, 0.18);
+  --focus-ring: rgba(58, 103, 82, 0.28);
+  --ambient-glow: rgba(58, 103, 82, 0.08);
+  --topbar-bg: rgba(250, 249, 254, 0.84);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .app-reading .disguise-theme-trigger:hover,
+  .app-reading .disguise-theme-trigger[aria-expanded='true'] {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--hover-bg) 58%, transparent);
+  }
 }

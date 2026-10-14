@@ -89,13 +89,19 @@ function createMockSettingsManager() {
       disguiseTheme: 'dark',
       stealthEnabled: true,
       hideShortcut: 'CommandOrControl+Shift+H',
+      mouseLeaveAction: 'deferred-quit',
+      mouseLeaveDelay: 5000,
+      mouseReturnDelay: 2000,
       autoSaveInterval: 30000
     }),
     setFontSize: vi.fn(),
     setFontFamily: vi.fn(),
     setLineHeight: vi.fn(),
     setDisguiseTheme: vi.fn(),
-    setStealthEnabled: vi.fn()
+    setStealthEnabled: vi.fn(),
+    setMouseLeaveAction: vi.fn(),
+    setMouseLeaveDelay: vi.fn(),
+    setMouseReturnDelay: vi.fn()
   }
 }
 
@@ -318,6 +324,9 @@ describe('registerSettingsHandlers', () => {
     expect(handlers[IPC_CHANNELS.SETTINGS_SET_LINE_HEIGHT]).toBeDefined()
     expect(handlers[IPC_CHANNELS.SETTINGS_SET_DISGUISE_THEME]).toBeDefined()
     expect(handlers[IPC_CHANNELS.SETTINGS_SET_STEALTH_ENABLED]).toBeDefined()
+    expect(handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_ACTION]).toBeDefined()
+    expect(handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_DELAY]).toBeDefined()
+    expect(handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_RETURN_DELAY]).toBeDefined()
   })
 
   it('settings:get should return full settings', () => {
@@ -330,6 +339,9 @@ describe('registerSettingsHandlers', () => {
       disguiseTheme: 'dark',
       stealthEnabled: true,
       hideShortcut: 'CommandOrControl+Shift+H',
+      mouseLeaveAction: 'deferred-quit',
+      mouseLeaveDelay: 5000,
+      mouseReturnDelay: 2000,
       autoSaveInterval: 30000
     })
   })
@@ -347,6 +359,42 @@ describe('registerSettingsHandlers', () => {
   it('settings:setStealthEnabled should persist the selected stealth mode state', () => {
     handlers[IPC_CHANNELS.SETTINGS_SET_STEALTH_ENABLED]({}, false)
     expect(mockManager.setStealthEnabled).toHaveBeenCalledWith(false)
+  })
+
+  it('settings:setMouseLeaveAction should validate and persist the selected action', () => {
+    handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_ACTION]({}, 'hide')
+    expect(mockManager.setMouseLeaveAction).toHaveBeenCalledWith('hide')
+  })
+
+  it('settings:setMouseLeaveDelay should validate and persist the selected delay', () => {
+    handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_DELAY]({}, 9000)
+    expect(mockManager.setMouseLeaveDelay).toHaveBeenCalledWith(9000)
+  })
+
+  it('settings:setMouseReturnDelay should validate and persist the selected show delay', () => {
+    handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_RETURN_DELAY]({}, 0)
+    expect(mockManager.setMouseReturnDelay).toHaveBeenCalledWith(0)
+  })
+
+  it('should notify the stealth manager when mouse leave settings change', async () => {
+    Object.keys(handlers).forEach(key => delete handlers[key])
+    const onMouseLeaveConfigChange = vi.fn()
+    const { registerSettingsHandlers } = await import('../../src/main/ipc-handlers')
+    registerSettingsHandlers(mockManager as any, () => true, undefined, onMouseLeaveConfigChange)
+
+    handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_ACTION]({}, 'deferred-quit')
+    handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_DELAY]({}, 7000)
+    handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_RETURN_DELAY]({}, 3000)
+
+    expect(onMouseLeaveConfigChange).toHaveBeenNthCalledWith(1, {
+      mouseLeaveAction: 'deferred-quit'
+    })
+    expect(onMouseLeaveConfigChange).toHaveBeenNthCalledWith(2, {
+      mouseLeaveDelay: 7000
+    })
+    expect(onMouseLeaveConfigChange).toHaveBeenNthCalledWith(3, {
+      mouseReturnDelay: 3000
+    })
   })
 
   it('settings:setStealthEnabled should call the optional side-effect callback', async () => {
@@ -375,6 +423,15 @@ describe('registerSettingsHandlers', () => {
     expect(() =>
       handlers[IPC_CHANNELS.SETTINGS_SET_STEALTH_ENABLED]({}, 'false')
     ).toThrow('Invalid stealth mode state')
+    expect(() =>
+      handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_ACTION]({}, 'later')
+    ).toThrow('Invalid mouse leave action')
+    expect(() =>
+      handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_DELAY]({}, 5500)
+    ).toThrow('Invalid mouse leave delay')
+    expect(() =>
+      handlers[IPC_CHANNELS.SETTINGS_SET_MOUSE_RETURN_DELAY]({}, 5500)
+    ).toThrow('Invalid mouse return delay')
   })
 
   it('should reject settings calls from an untrusted sender', async () => {

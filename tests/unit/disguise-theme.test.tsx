@@ -85,6 +85,71 @@ describe('DisguiseTheme', () => {
     fireEvent.click(screen.getByLabelText('隐身模式'))
     expect(onStealthEnabledChange).toHaveBeenCalledWith(false)
   })
+
+  it('renders and updates mouse leave behavior settings', () => {
+    const onMouseLeaveActionChange = vi.fn()
+    const onMouseLeaveDelayChange = vi.fn()
+    render(
+      <DisguiseTheme
+        theme="dark"
+        stealthEnabled={true}
+        mouseLeaveAction="deferred-quit"
+        mouseLeaveDelay={5000}
+        onThemeChange={vi.fn()}
+        onStealthEnabledChange={vi.fn()}
+        onMouseLeaveActionChange={onMouseLeaveActionChange}
+        onMouseLeaveDelayChange={onMouseLeaveDelayChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('鼠标移出行为'), {
+      target: { value: 'hide' }
+    })
+    fireEvent.change(screen.getByLabelText('延迟秒数'), {
+      target: { value: '9000' }
+    })
+
+    expect(onMouseLeaveActionChange).toHaveBeenCalledWith('hide')
+    expect(onMouseLeaveDelayChange).toHaveBeenCalledWith(9000)
+  })
+
+  it('disables the delay control for immediate quit', () => {
+    render(
+      <DisguiseTheme
+        theme="dark"
+        stealthEnabled={true}
+        mouseLeaveAction="quit"
+        mouseLeaveDelay={5000}
+        onThemeChange={vi.fn()}
+        onStealthEnabledChange={vi.fn()}
+      />
+    )
+
+    expect((screen.getByLabelText('延迟秒数') as HTMLInputElement).disabled).toBe(true)
+    expect(screen.getByText('立即退出已关闭延迟设置，请谨慎使用。')).toBeDefined()
+  })
+
+  it('renders and updates the configurable show delay', () => {
+    const onMouseReturnDelayChange = vi.fn()
+    render(
+      <DisguiseTheme
+        theme="dark"
+        stealthEnabled={true}
+        mouseLeaveAction="hide"
+        mouseLeaveDelay={0}
+        mouseReturnDelay={2000}
+        onThemeChange={vi.fn()}
+        onStealthEnabledChange={vi.fn()}
+        onMouseReturnDelayChange={onMouseReturnDelayChange}
+      />
+    )
+
+    expect(screen.getByText('显形延迟')).toBeDefined()
+    fireEvent.change(screen.getByLabelText('显形延迟秒数'), {
+      target: { value: '0' }
+    })
+    expect(onMouseReturnDelayChange).toHaveBeenCalledWith(0)
+  })
 })
 
 describe('getThemeClassName', () => {

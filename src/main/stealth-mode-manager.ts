@@ -1,16 +1,27 @@
 import { ipcMain, screen } from 'electron'
 import { IPC_CHANNELS, IPC_EVENTS } from '../shared/ipc-channels'
-import type { StealthConfig, DisguiseTheme } from '../shared/types'
-import { DEFAULT_MOUSE_LEAVE_QUIT_DELAY } from '../shared/constants'
+import type { StealthConfig, DisguiseTheme, MouseLeaveAction } from '../shared/types'
+import {
+  DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+  DEFAULT_MOUSE_RETURN_DELAY
+} from '../shared/constants'
 import { assertTrustedIpcSender, type IpcSenderValidator } from './ipc-security'
 
 type LegacyDisguiseTheme = 'code-editor' | 'terminal'
 
 const RETURN_HOT_ZONE_POLL_INTERVAL = 100
+/** 指针远离热区时的轮询间隔（ms）：隐藏期间不必保持 10Hz 唤醒主进程 */
+const RETURN_HOT_ZONE_IDLE_INTERVAL = 500
 const DEFAULT_MOUSE_LEAVE_DELAY = 200
 const RETURN_HOT_ZONE_MARGIN = 12
-const RETURN_HOT_ZONE_DWELL_TIME = 2000
 const WINDOW_CURSOR_MARGIN = 1
+
+export type StealthState =
+  | 'visible'
+  | 'pending-hide'
+  | 'hidden-returnable'
+  | 'pending-quit'
+  | 'quitting'
 
 /** globalShortcut 接口（仅使用到的方法） */
 export interface GlobalShortcutLike {
@@ -32,6 +43,20 @@ export interface BrowserWindowLike {
   webContents: {
     send(channel: string, ...args: unknown[]): void
   }
+}
+
+/**
+ * 平台级隐身钩子。
+ *
+ * setSkipTaskbar 只影响 Windows/Linux 任务栏；macOS 上窗口隐藏后 Dock 图标
+ * 与 Cmd+Tab 条目依然可见，等于「藏了窗口没藏应用」。这里把平台差异抽成
+ * 可注入的接口，便于单测覆盖，也避免在管理器里散落 process.platform 判断。
+ */
+export interface PlatformStealthHooks {
+  /** 隐藏/恢复 macOS Dock 图标（其他平台为 no-op） */
+  setDockVisible?(visible: boolean): void
+  /** 退出前落盘等收尾工作 */
+  beforeQuit?(): void
 }
 
 /** 隐藏前保存的阅读状态 */
@@ -64,6 +89,17 @@ export class StealthModeManager {
   private quitting = false
   private deferredQuitTimer: ReturnType<typeof setTimeout> | null = null
   private deferredQuitPending = false
+  private state: StealthState = 'visible'
+  private windowInteractionLocked = false
+  private platformHooks: PlatformStealthHooks = {}
+
+  /**
+   * 注入平台级隐身钩子（macOS Dock 图标、退出前落盘等）。
+   * 必须在 initialize 之前调用，否则首次 hide() 不会隐藏 Dock 图标。
+   */
+  setPlatformHooks(hooks: PlatformStealthHooks): void {
+    this.platformHooks = hooks
+  }
 
   /**
    * 初始化隐蔽模式管理器
@@ -82,9 +118,11 @@ export class StealthModeManager {
     this.config = config
     this.quitApplication = quitApplication ?? null
     this.hidden = false
+    this.state = 'visible'
     this.lastState = null
     this.mouseTrackingEnabled = false
     this.quitting = false
+    this.windowInteractionLocked = false
   }
 
   /**
@@ -103,8 +141,12 @@ export class StealthModeManager {
 
     this.window.setSkipTaskbar(true)
     this.window.hide()
+    // macOS 上窗口隐藏后 Dock 图标与 Cmd+Tab 条目仍然可见，
+    // 只 hide 窗口等于「藏了窗口没藏应用」。
+    this.platformHooks.setDockVisible?.(false)
 
     this.hidden = true
+    this.state = 'hidden-returnable'
 
     // 通知渲染进程
     this.window.webContents.send(IPC_EVENTS.STEALTH_HIDDEN)
@@ -133,10 +175,12 @@ export class StealthModeManager {
     }
 
     this.window.setSkipTaskbar(false)
+    this.platformHooks.setDockVisible?.(true)
     this.window.show()
     this.window.focus?.()
 
     this.hidden = false
+    this.state = 'visible'
     this.stopReturnHotZoneTracking()
 
     // 通知渲染进程
@@ -148,6 +192,30 @@ export class StealthModeManager {
    */
   isHidden(): boolean {
     return this.hidden
+  }
+
+  getState(): StealthState {
+    return this.state
+  }
+
+  beginWindowInteraction(): void {
+    if (this.quitting) return
+    this.windowInteractionLocked = true
+    this.cancelMouseLeaveHide()
+    if (this.deferredQuitPending) {
+      this.cancelDeferredQuit(true)
+    }
+  }
+
+  endWindowInteraction(): void {
+    this.windowInteractionLocked = false
+    if (
+      this.mouseTrackingEnabled &&
+      !this.quitting &&
+      !this.isCursorInsideWindowBounds()
+    ) {
+      this.handleMouseLeave()
+    }
   }
 
   /**
@@ -166,6 +234,35 @@ export class StealthModeManager {
   }
 
   /**
+   * 更新鼠标移出行为配置。
+   * 新配置从下一次 mouseleave 开始生效；若旧配置已有等待中的隐藏/退出，
+   * 先取消旧计时并恢复窗口，避免旧动作在用户改完设置后继续执行。
+   */
+  updateMouseLeaveConfig(update: {
+    mouseLeaveAction?: MouseLeaveAction
+    mouseLeaveDelay?: number
+    mouseReturnDelay?: number
+  }): void {
+    if (!this.config) return
+
+    this.cancelMouseLeaveHide()
+    this.cancelDeferredQuit(true)
+    this.stopReturnHotZoneTracking()
+    this.config = {
+      ...this.config,
+      ...update
+    }
+    // A setting change is an explicit user interaction. Leave the manager in
+    // a visible, deterministic state instead of allowing a previous action's
+    // hidden window or hot-zone timer to leak into the new configuration.
+    if (this.hidden && !this.quitting) {
+      this.show()
+    } else if (!this.hidden) {
+      this.state = 'visible'
+    }
+  }
+
+  /**
    * 启用鼠标追踪
    * 启用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息将触发配置的行为。
    */
@@ -175,13 +272,19 @@ export class StealthModeManager {
 
   /**
    * 禁用鼠标追踪
-   * 禁用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息不会触发隐蔽行为。
+   * 禁用后，渲染进程发送的 mouseLeave/mouseEnter IPC 消息不会触发隐蔽行为；
+   * 同时取消等待并恢复窗口，避免用户关掉隐身后仍停留在不可见状态。
    */
   disableMouseTracking(): void {
     this.mouseTrackingEnabled = false
     this.cancelMouseLeaveHide()
     this.cancelDeferredQuit(true)
     this.stopReturnHotZoneTracking()
+    if (this.hidden && !this.quitting) {
+      this.show()
+    } else if (!this.hidden) {
+      this.state = 'visible'
+    }
   }
 
   /**
@@ -196,7 +299,13 @@ export class StealthModeManager {
    * 当鼠标追踪启用时，按配置隐藏窗口或退出整个应用。
    */
   handleMouseLeave(): void {
-    if (!this.mouseTrackingEnabled || this.quitting) {
+    if (!this.mouseTrackingEnabled || this.quitting || this.windowInteractionLocked) {
+      return
+    }
+
+    // React 的 mouseleave 可能发生在渲染区进入原生标题栏/边框时；
+    // 只要指针仍在 BrowserWindow 矩形内，就不执行任何隐身动作。
+    if (this.isCursorInsideWindowBounds()) {
       return
     }
 
@@ -227,6 +336,7 @@ export class StealthModeManager {
     }
 
     this.cancelMouseLeaveHide()
+    if (!this.hidden) this.state = 'visible'
     if (this.mouseTrackingEnabled) {
       this.show()
     }
@@ -338,7 +448,11 @@ export class StealthModeManager {
   }
 
   private scheduleMouseLeaveHide(): void {
+    if (this.mouseLeaveTimer !== null || this.state === 'pending-hide') {
+      return
+    }
     this.cancelMouseLeaveHide()
+    this.state = 'pending-hide'
 
     const delay = this.config?.mouseLeaveDelay ?? DEFAULT_MOUSE_LEAVE_DELAY
     if (delay <= 0) {
@@ -348,6 +462,19 @@ export class StealthModeManager {
 
     this.mouseLeaveTimer = setTimeout(() => {
       this.mouseLeaveTimer = null
+      if (this.windowInteractionLocked) {
+        this.state = this.hidden ? 'hidden-returnable' : 'visible'
+        return
+      }
+
+      // A renderer mouseleave can happen while the pointer moves into the
+      // native hiddenInset title bar. Re-check the full BrowserWindow before
+      // hiding so title-bar and traffic-light interactions never trigger a
+      // delayed hide just because the renderer did not receive mouseenter.
+      if (this.isCursorInsideWindowBounds()) {
+        this.state = this.hidden ? 'hidden-returnable' : 'visible'
+        return
+      }
       this.hide(true)
     }, delay)
 
@@ -375,9 +502,11 @@ export class StealthModeManager {
     }
 
     this.deferredQuitPending = true
+    this.state = 'pending-quit'
     this.window.setAlwaysOnTop?.(false)
     this.window.blur?.()
     this.hide(true)
+    this.state = 'pending-quit'
 
     const delay = this.config?.mouseLeaveDelay ?? DEFAULT_MOUSE_LEAVE_QUIT_DELAY
     if (delay <= 0) {
@@ -431,9 +560,19 @@ export class StealthModeManager {
     }
 
     this.quitting = true
+    this.state = 'quitting'
     this.cancelMouseLeaveHide()
     this.cancelDeferredQuit(false)
     this.stopReturnHotZoneTracking()
+
+    // 退出前先落盘：鼠标移出触发的自动退出不会走窗口 closed 流程，
+    // 不 flush 会丢掉最后一个保存周期内的阅读进度。
+    try {
+      this.platformHooks.beforeQuit?.()
+    } catch {
+      // 收尾失败不应阻止退出。
+    }
+
     this.quitApplication?.()
   }
 
@@ -441,6 +580,9 @@ export class StealthModeManager {
     if (this.mouseLeaveTimer !== null) {
       clearTimeout(this.mouseLeaveTimer)
       this.mouseLeaveTimer = null
+    }
+    if (this.state === 'pending-hide' && !this.hidden && !this.quitting) {
+      this.state = 'visible'
     }
   }
 
@@ -460,14 +602,32 @@ export class StealthModeManager {
 
   /**
    * 启动原地热区追踪：窗口隐藏后，鼠标回到隐藏前窗口矩形区域即显示。
+   *
+   * 用递归 setTimeout 而不是固定 10Hz 的 setInterval：窗口隐藏期间可能持续
+   * 几分钟到几小时，恒定 100ms 轮询等于白白唤醒主进程。这里按「指针是否
+   * 靠近热区」在快/慢两档之间切换，只有真正接近时才用高精度。
    */
   private startReturnHotZoneTracking(): void {
     if (!this.hiddenBounds) return
 
     this.stopReturnHotZoneTracking()
-    this.returnHotZoneTimer = setInterval(() => {
-      this.showIfCursorReturnedToHotZone()
-    }, RETURN_HOT_ZONE_POLL_INTERVAL)
+    this.scheduleHotZonePoll(RETURN_HOT_ZONE_POLL_INTERVAL)
+  }
+
+  private scheduleHotZonePoll(interval: number): void {
+    if (this.returnHotZoneTimer !== null) {
+      clearTimeout(this.returnHotZoneTimer)
+    }
+
+    this.returnHotZoneTimer = setTimeout(() => {
+      this.returnHotZoneTimer = null
+      if (!this.hidden) return
+
+      const nearHotZone = this.showIfCursorReturnedToHotZone()
+      this.scheduleHotZonePoll(
+        nearHotZone ? RETURN_HOT_ZONE_POLL_INTERVAL : RETURN_HOT_ZONE_IDLE_INTERVAL
+      )
+    }, interval)
 
     const timer = this.returnHotZoneTimer as { unref?: () => void }
     timer.unref?.()
@@ -475,14 +635,18 @@ export class StealthModeManager {
 
   private stopReturnHotZoneTracking(): void {
     if (this.returnHotZoneTimer !== null) {
-      clearInterval(this.returnHotZoneTimer)
+      clearTimeout(this.returnHotZoneTimer)
       this.returnHotZoneTimer = null
     }
     this.returnHotZoneEnteredAt = null
   }
 
-  private showIfCursorReturnedToHotZone(): void {
-    if (!this.hidden || !this.hiddenBounds || !this.mouseTrackingEnabled) return
+  /**
+   * 指针回到热区则显示窗口。
+   * @returns 指针是否已进入热区附近（决定下一轮轮询用快档还是慢档）
+   */
+  private showIfCursorReturnedToHotZone(): boolean {
+    if (!this.hidden || !this.hiddenBounds || !this.mouseTrackingEnabled) return false
 
     const point = screen.getCursorScreenPoint()
     const { x, y, width, height } = this.hiddenBounds
@@ -494,18 +658,23 @@ export class StealthModeManager {
 
     if (!inside) {
       this.returnHotZoneEnteredAt = null
-      return
+      return false
     }
 
     const now = Date.now()
     if (this.returnHotZoneEnteredAt === null) {
       this.returnHotZoneEnteredAt = now
-      return
+      if ((this.config?.mouseReturnDelay ?? DEFAULT_MOUSE_RETURN_DELAY) <= 0) {
+        this.show()
+      }
+      return true
     }
 
-    if (now - this.returnHotZoneEnteredAt >= RETURN_HOT_ZONE_DWELL_TIME) {
+    const returnDelay = this.config?.mouseReturnDelay ?? DEFAULT_MOUSE_RETURN_DELAY
+    if (now - this.returnHotZoneEnteredAt >= returnDelay) {
       this.show()
     }
+    return true
   }
 
   /**
@@ -519,6 +688,8 @@ export class StealthModeManager {
     this.window = null
     this.config = null
     this.hidden = false
+    this.state = 'visible'
+    this.windowInteractionLocked = false
     this.lastState = null
     this.hiddenBounds = null
     this.currentReadingState = { chapterIndex: 0, scrollPosition: 0 }

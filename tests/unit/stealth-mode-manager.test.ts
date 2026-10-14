@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { StealthModeManager, BrowserWindowLike, GlobalShortcutLike } from '../../src/main/stealth-mode-manager'
 import type { StealthConfig } from '../../src/shared/types'
+import { DEFAULT_MOUSE_RETURN_DELAY } from '../../src/shared/constants'
 
 // Mock electron ipcMain
 const handlers: Record<string, (...args: unknown[]) => unknown> = {}
@@ -431,6 +432,19 @@ describe('StealthModeManager', () => {
       expect(mockWindow.alwaysOnTop).toBe(true)
     })
 
+    it('should keep hide and quit actions inside the native window boundary', () => {
+      cursorPoint = { x: 500, y: 105 }
+      manager.enableMouseTracking()
+      manager.handleMouseLeave()
+      expect(manager.isHidden()).toBe(false)
+
+      const quitManager = new StealthModeManager()
+      quitManager.initialize(mockWindow, { ...config, mouseLeaveAction: 'quit' }, quitApplication)
+      quitManager.enableMouseTracking()
+      quitManager.handleMouseLeave()
+      expect(quitApplication).not.toHaveBeenCalled()
+    })
+
     it('should re-check the cursor position before deferred quit', () => {
       vi.useFakeTimers()
       const quitManager = new StealthModeManager()
@@ -513,6 +527,48 @@ describe('StealthModeManager', () => {
       expect(delayedManager.isHidden()).toBe(true)
     })
 
+    it('should re-check the native window boundary before delayed hide', () => {
+      vi.useFakeTimers()
+      const delayedManager = new StealthModeManager()
+      delayedManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'hide',
+        mouseLeaveDelay: 200
+      })
+      delayedManager.enableMouseTracking()
+
+      cursorPoint = { x: 50, y: 50 }
+      delayedManager.handleMouseLeave()
+      cursorPoint = { x: 500, y: 105 }
+      vi.advanceTimersByTime(200)
+
+      expect(delayedManager.isHidden()).toBe(false)
+      expect(mockWindow.visible).toBe(true)
+      expect(delayedManager.getState()).toBe('visible')
+    })
+
+    it('should apply updated mouse leave config on the next mouseleave', () => {
+      vi.useFakeTimers()
+      const configurableManager = new StealthModeManager()
+      configurableManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'hide',
+        mouseLeaveDelay: 200
+      }, quitApplication)
+      configurableManager.enableMouseTracking()
+
+      configurableManager.updateMouseLeaveConfig({
+        mouseLeaveAction: 'deferred-quit',
+        mouseLeaveDelay: 3000
+      })
+      configurableManager.handleMouseLeave()
+
+      expect(configurableManager.isHidden()).toBe(true)
+      expect(quitApplication).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(3000)
+      expect(quitApplication).toHaveBeenCalledOnce()
+    })
+
     it('should cancel delayed hiding when mouse enters before the delay elapses', () => {
       vi.useFakeTimers()
       const delayedManager = new StealthModeManager()
@@ -529,6 +585,33 @@ describe('StealthModeManager', () => {
 
       expect(delayedManager.isHidden()).toBe(false)
       expect(mockWindow.visible).toBe(true)
+    })
+
+    it('should restore a hidden window when stealth tracking is disabled', () => {
+      manager.enableMouseTracking()
+      manager.hide(true)
+
+      manager.disableMouseTracking()
+
+      expect(manager.isMouseTrackingEnabled()).toBe(false)
+      expect(manager.isHidden()).toBe(false)
+      expect(manager.getState()).toBe('visible')
+      expect(mockWindow.visible).toBe(true)
+    })
+
+    it('should cancel the old hidden state when mouse leave settings change', () => {
+      manager.enableMouseTracking()
+      manager.hide(true)
+
+      manager.updateMouseLeaveConfig({
+        mouseLeaveAction: 'quit',
+        mouseLeaveDelay: 9000
+      })
+
+      expect(manager.isHidden()).toBe(false)
+      expect(manager.getState()).toBe('visible')
+      expect(mockWindow.visible).toBe(true)
+      expect(mockWindow.sentEvents).toContainEqual({ channel: 'stealth:shown', args: [] })
     })
   })
 
@@ -586,7 +669,7 @@ describe('StealthModeManager', () => {
       expect(mockWindow.skipTaskbar).toBe(false)
     })
 
-    it('should not restore window until cursor dwells in the return hot zone', () => {
+  it('should not restore window until cursor dwells in the return hot zone', () => {
       vi.useFakeTimers()
       manager.enableMouseTracking()
 
@@ -602,8 +685,32 @@ describe('StealthModeManager', () => {
       expect(manager.isHidden()).toBe(true)
 
       vi.advanceTimersByTime(100)
-      expect(manager.isHidden()).toBe(false)
+    expect(manager.isHidden()).toBe(false)
+  })
+
+  it('should use the configured show delay for the return hot zone', () => {
+    vi.useFakeTimers()
+    const delayedShowManager = new StealthModeManager()
+    delayedShowManager.initialize(mockWindow, {
+      ...config,
+      mouseLeaveAction: 'hide',
+      mouseLeaveDelay: 0,
+      mouseReturnDelay: 5000
     })
+    delayedShowManager.enableMouseTracking()
+
+    cursorPoint = { x: 50, y: 50 }
+    delayedShowManager.handleMouseLeave()
+    expect(delayedShowManager.isHidden()).toBe(true)
+
+    cursorPoint = { x: 150, y: 150 }
+    vi.advanceTimersByTime(100)
+    vi.advanceTimersByTime(4900)
+    expect(delayedShowManager.isHidden()).toBe(true)
+
+    vi.advanceTimersByTime(100)
+    expect(delayedShowManager.isHidden()).toBe(false)
+  })
 
     it('should restore window inside the margin around hidden bounds', () => {
       vi.useFakeTimers()
@@ -901,6 +1008,95 @@ describe('StealthModeManager', () => {
         'Invalid disguise theme'
       )
       expect(manager.getCurrentDisguise()).toBeNull()
+    })
+  })
+
+  describe('platform stealth hooks', () => {
+    it('hides the dock icon while hidden and restores it on show', () => {
+      const setDockVisible = vi.fn()
+      manager.setPlatformHooks({ setDockVisible })
+
+      manager.hide()
+      expect(setDockVisible).toHaveBeenLastCalledWith(false)
+
+      manager.show()
+      expect(setDockVisible).toHaveBeenLastCalledWith(true)
+    })
+
+    it('does not touch the dock when no hook is injected', () => {
+      // 默认无钩子时不应抛错（Linux/Windows 及测试环境）。
+      expect(() => manager.hide()).not.toThrow()
+      expect(() => manager.show()).not.toThrow()
+    })
+
+    it('flushes pending work before quitting the application', () => {
+      const beforeQuit = vi.fn()
+      manager.setPlatformHooks({ beforeQuit })
+      manager.initialize(mockWindow, config, quitApplication)
+
+      manager.updateMouseLeaveConfig({ mouseLeaveAction: 'quit' })
+      manager.enableMouseTracking()
+      manager.handleMouseLeave()
+
+      expect(beforeQuit).toHaveBeenCalledTimes(1)
+      expect(quitApplication).toHaveBeenCalledTimes(1)
+    })
+
+    it('still quits when the pre-quit hook throws', () => {
+      manager.setPlatformHooks({
+        beforeQuit: () => {
+          throw new Error('disk full')
+        }
+      })
+      manager.initialize(mockWindow, config, quitApplication)
+
+      manager.updateMouseLeaveConfig({ mouseLeaveAction: 'quit' })
+      manager.enableMouseTracking()
+      manager.handleMouseLeave()
+
+      // 收尾失败不能阻止退出，否则窗口会卡在不可见状态。
+      expect(quitApplication).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('return hot-zone polling', () => {
+    it('polls less often while the cursor is far from the hot zone', () => {
+      vi.useFakeTimers()
+      try {
+        manager.initialize(mockWindow, config)
+        manager.enableMouseTracking()
+        manager.hide(true)
+
+        // 指针远离热区：100ms 的慢档不应触发检查。
+        cursorPoint = { x: 5000, y: 5000 }
+        vi.advanceTimersByTime(100)
+        expect(manager.isHidden()).toBe(true)
+
+        // 慢档间隔到达后仍会检查一次，但指针不在热区所以保持隐藏。
+        vi.advanceTimersByTime(500)
+        expect(manager.isHidden()).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('restores the window once the cursor returns to the hot zone', () => {
+      vi.useFakeTimers()
+      try {
+        manager.initialize(mockWindow, config)
+        manager.enableMouseTracking()
+        manager.hide(true)
+
+        // 回到隐藏前的窗口矩形内。默认显形延迟是 DEFAULT_MOUSE_RETURN_DELAY，
+        // 需要跨过该延迟加上一轮轮询间隔才会恢复。
+        cursorPoint = { x: 300, y: 300 }
+        vi.advanceTimersByTime(DEFAULT_MOUSE_RETURN_DELAY + 600)
+
+        expect(manager.isHidden()).toBe(false)
+        expect(mockWindow.visible).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

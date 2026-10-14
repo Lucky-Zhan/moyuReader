@@ -1,106 +1,89 @@
-/* 全局应用样式 */
-:root {
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-  --motion-fast: 140ms;
-  --motion-standard: 220ms;
-  --motion-slow: 320ms;
-}
-
 * {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
 }
 
-html, body, #root {
-  height: 100%;
+html,
+body,
+#root {
   width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
 .app {
-  height: 100%;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--app-bg);
-  color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
   isolation: isolate;
   overflow: hidden;
-  transition: background-color var(--motion-slow) var(--ease-out), color var(--motion-slow) var(--ease-out);
+  background: var(--surface-canvas, var(--app-bg));
+  color: var(--ink-primary, var(--text));
+  font-family: var(--font-ui);
+  transition: background-color var(--duration-theme) var(--ease-apple-out), color var(--duration-theme) var(--ease-apple-out);
 }
 
 .app-topbar {
+  position: relative;
+  z-index: 30;
   display: flex;
+  min-height: 36px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: flex-end;
-  min-height: 36px;
   padding: 6px 14px 5px 78px;
-  background: var(--topbar-bg, var(--panel-bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--separator) 62%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 76%, transparent);
+  overflow: visible;
   backdrop-filter: blur(18px) saturate(140%);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035), 0 8px 24px rgba(0, 0, 0, 0.08);
-  flex-shrink: 0;
-  -webkit-app-region: drag;
-  position: relative;
-  z-index: 3;
-  transition: background-color var(--motion-slow) var(--ease-out), border-color var(--motion-slow) var(--ease-out);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  -webkit-app-region: no-drag;
+  user-select: none;
 }
 
-/* 阅读器布局：左侧章节目录 + 右侧阅读区 */
 .reader-layout {
+  position: relative;
   display: flex;
-  flex: 1;
   width: 100%;
-  overflow: hidden;
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .reader-main {
-  flex: 1;
   display: flex;
-  flex-direction: column;
   min-width: 0;
   height: 100%;
+  flex: 1;
+  flex-direction: column;
 }
 
-.reader-toolbar-theme {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-height: 28px;
-  padding: 2px 12px;
-  background: var(--panel-bg);
-  border-bottom: 1px solid var(--border);
-}
-
-/* 确保阅读内容区域文字可见 */
-.reader-content {
-  color: var(--text);
-}
-
-/* 书架在 app 容器内的布局 */
 .app .bookshelf {
+  width: 100%;
   height: 100%;
-  overflow-y: auto;
-  background: transparent;
-  color: var(--text);
+  min-height: 0;
 }
 
-/* 窗口拖拽区域（无边框窗口需要） */
+/* Pointer Capture in App.tsx implements the drag. The region is deliberately
+ * transparent and text-select-free, avoiding Chromium drag-region quirks. */
 .app-drag-region {
-  -webkit-app-region: drag;
-  height: 34px;
-  left: 72px;
-  right: 48px;
   position: absolute;
   top: 0;
+  right: 80px;
+  left: 72px;
   z-index: 4;
-  pointer-events: none;
+  height: 44px;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-app-region: no-drag;
 }
+
+.app-drag-region:active { cursor: grabbing; }
 
 button,
 input,
@@ -113,27 +96,40 @@ details {
 button,
 input,
 select,
-summary {
-  font: inherit;
-}
+summary { font: inherit; }
 
 button:not(:disabled),
-summary {
-  -webkit-tap-highlight-color: transparent;
-}
+summary { -webkit-tap-highlight-color: transparent; }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 summary:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--focus-ring, rgba(0, 122, 204, 0.28));
+  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--tint) 30%, transparent);
 }
 
-button:not(:disabled):active,
-summary:active {
-  transform: scale(0.98);
+button:not(:disabled):active { transform: scale(var(--control-press-scale)); }
+summary:active { transform: none; }
+
+.app-reading .app-topbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 45;
+  min-height: 44px;
+  padding: 6px 12px 6px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
+
+.app-reading .app-topbar .disguise-theme-selector { pointer-events: auto; }
+.app-reading .reader-layout { height: 100%; }
+.app-reading .app-drag-region { height: 88px; }
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -144,4 +140,8 @@ summary:active {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-topbar { background: var(--surface-elevated, var(--panel-bg)); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }

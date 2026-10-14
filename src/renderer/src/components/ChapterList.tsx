@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Chapter } from '../../../shared/types'
+import type { Chapter } from '@shared/types'
+import { getChapterTypeLabel } from '@shared/chapter-patterns'
 import './ChapterList.css'
 
 const CHAPTER_ROW_HEIGHT = 36
@@ -21,16 +22,6 @@ type ChapterListEntry =
       chapter: Chapter
       index: number
     }
-
-function getChapterTypeLabel(chapter: Chapter): string {
-  if (chapter.type === 'volume') return '卷'
-  if (chapter.type === 'section') return '段'
-  if (/^第[一二三四五六七八九十百千万零\d]+[卷部集篇]|^卷[一二三四五六七八九十百千万零\d]+/.test(chapter.title)) {
-    return '卷'
-  }
-  if (/^第\s*\d+\s*段/.test(chapter.title)) return '段'
-  return '章'
-}
 
 function getEntryHeight(entry: ChapterListEntry): number {
   return entry.kind === 'volume' ? VOLUME_ROW_HEIGHT : CHAPTER_ROW_HEIGHT
@@ -171,7 +162,14 @@ export function ChapterList({
     }
 
     if (activeRef.current && activeRef.current.scrollIntoView) {
-      activeRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      const prefersReducedMotion =
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      activeRef.current.scrollIntoView({
+        block: 'nearest',
+        behavior: prefersReducedMotion ? 'instant' : 'smooth'
+      })
     }
   }, [activeEntryIndex, currentChapterIndex, entryOffsets, shouldVirtualize])
 
@@ -201,7 +199,6 @@ export function ChapterList({
         style={shouldVirtualize ? { height: CHAPTER_ROW_HEIGHT } : undefined}
         onClick={() => onSelectChapter(index)}
         title={chapter.title}
-        role="listitem"
         aria-current={index === currentChapterIndex ? 'true' : undefined}
       >
         <span className="chapter-list-item-type">{getChapterTypeLabel(chapter)}</span>

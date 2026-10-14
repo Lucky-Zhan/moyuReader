@@ -6,14 +6,19 @@ export type EncodingType = 'utf-8' | 'gbk';
 /** 阅读配色/伪装主题类型 */
 export type DisguiseTheme = 'dark' | 'light' | 'paper' | 'code' | 'terminal';
 
+/** 鼠标移出窗口后的处理方式 */
+export type MouseLeaveAction = 'hide' | 'quit' | 'deferred-quit';
+
 /** 隐蔽模式配置 */
 export interface StealthConfig {
   /** 快捷键，默认 "CommandOrControl+Shift+H" */
   hideShortcut: string;
-  /** 鼠标移出后的处理方式，默认隐藏窗口 */
-  mouseLeaveAction?: 'hide' | 'quit' | 'deferred-quit';
+  /** 鼠标移出后的处理方式，默认先隐藏并延迟退出 */
+  mouseLeaveAction?: MouseLeaveAction;
   /** 鼠标移出后的延迟时间（ms）；hide 模式用于隐藏，deferred-quit 模式用于退出缓冲 */
   mouseLeaveDelay: number;
+  /** 鼠标回到原位置后，恢复窗口前的停留时间（ms） */
+  mouseReturnDelay?: number;
   /** 隐藏方式 */
   hideAnimation: 'opacity' | 'hide';
 }
@@ -46,6 +51,8 @@ export interface BookMeta {
   fileSize: number;
   /** 章节目录 */
   chapters: Chapter[];
+  /** 生成章节目录所用的解析器版本，用于旧书架数据迁移 */
+  chapterParserVersion?: number;
   /** 添加时间戳 */
   addedAt: number;
   /** 最后阅读时间戳 */
@@ -104,6 +111,12 @@ export interface ReaderOpenResult {
   progress: ReadingProgress;
   /** 当前进度对应章节正文 */
   chapterContent: ChapterContent;
+}
+
+/** 书架条目：书籍元数据 + 阅读进度（一次 IPC 返回，避免 N+1 查询） */
+export interface LibraryItem {
+  book: BookMeta;
+  progress: ReadingProgress | null;
 }
 
 /** 搜索结果 */
@@ -197,6 +210,12 @@ export interface AppSettings {
   stealthEnabled: boolean;
   /** 隐藏快捷键 */
   hideShortcut: string;
+  /** 鼠标移出后的处理方式，默认先隐藏，延迟退出 */
+  mouseLeaveAction: MouseLeaveAction;
+  /** 鼠标移出后的延迟时间（ms），范围 0–15 秒 */
+  mouseLeaveDelay: number;
+  /** 鼠标回到隐藏位置后，恢复窗口前的停留时间（ms），范围 0–15 秒 */
+  mouseReturnDelay: number;
   /** 自动保存间隔（ms），默认 30000 */
   autoSaveInterval: number;
 }

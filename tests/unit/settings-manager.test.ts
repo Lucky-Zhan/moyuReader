@@ -8,7 +8,14 @@ import {
   DEFAULT_FONT_FAMILY,
   AUTO_SAVE_INTERVAL,
   DEFAULT_HIDE_SHORTCUT,
-  DEFAULT_LINE_HEIGHT
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_MOUSE_LEAVE_ACTION,
+  DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+  DEFAULT_MOUSE_RETURN_DELAY,
+  MOUSE_LEAVE_DELAY_MIN,
+  MOUSE_LEAVE_DELAY_MAX,
+  MOUSE_RETURN_DELAY_MIN,
+  MOUSE_RETURN_DELAY_MAX
 } from '../../src/shared/constants'
 
 /** 创建一个内存中的 mock store */
@@ -184,10 +191,13 @@ describe('SettingsManager', () => {
       expect(settings).toEqual({
         fontSize: 20,
         fontFamily: 'Menlo, monospace',
-        lineHeight: 1.8,
+        lineHeight: DEFAULT_LINE_HEIGHT,
         disguiseTheme: 'paper',
         stealthEnabled: false,
         hideShortcut: 'CommandOrControl+H',
+        mouseLeaveAction: DEFAULT_MOUSE_LEAVE_ACTION,
+        mouseLeaveDelay: DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+        mouseReturnDelay: DEFAULT_MOUSE_RETURN_DELAY,
         autoSaveInterval: 60000
       })
     })
@@ -220,7 +230,7 @@ describe('SettingsManager', () => {
       mockStore.set('settings', {
         fontSize: 20,
         fontFamily: 'Menlo, monospace',
-        lineHeight: 1.8,
+        lineHeight: DEFAULT_LINE_HEIGHT,
         disguiseTheme: 'paper',
         stealthEnabled: true,
         hideShortcut: 'CommandOrControl+H',
@@ -232,12 +242,65 @@ describe('SettingsManager', () => {
       expect(settings).toEqual({
         fontSize: 20,
         fontFamily: 'Menlo, monospace',
-        lineHeight: 1.8,
+        lineHeight: DEFAULT_LINE_HEIGHT,
         disguiseTheme: 'paper',
         stealthEnabled: false,
         hideShortcut: 'CommandOrControl+H',
+        mouseLeaveAction: DEFAULT_MOUSE_LEAVE_ACTION,
+        mouseLeaveDelay: DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+        mouseReturnDelay: DEFAULT_MOUSE_RETURN_DELAY,
         autoSaveInterval: 60000
       })
+    })
+  })
+
+  describe('mouse leave settings', () => {
+    it('should persist a valid mouse leave action and delay', () => {
+      manager.setMouseLeaveAction('hide')
+      manager.setMouseLeaveDelay(9000)
+
+      expect(manager.getSettings().mouseLeaveAction).toBe('hide')
+      expect(manager.getSettings().mouseLeaveDelay).toBe(9000)
+    })
+
+    it('should normalize an out-of-range delay', () => {
+      manager.setMouseLeaveDelay(0)
+      expect(manager.getSettings().mouseLeaveDelay).toBe(MOUSE_LEAVE_DELAY_MIN)
+
+      manager.setMouseLeaveDelay(99999)
+      expect(manager.getSettings().mouseLeaveDelay).toBe(MOUSE_LEAVE_DELAY_MAX)
+    })
+
+    it('should persist and clamp the mouse return delay', () => {
+      manager.setMouseReturnDelay(7000)
+      expect(manager.getSettings().mouseReturnDelay).toBe(7000)
+
+      manager.setMouseReturnDelay(-1)
+      expect(manager.getSettings().mouseReturnDelay).toBe(MOUSE_RETURN_DELAY_MIN)
+
+      manager.setMouseReturnDelay(99999)
+      expect(manager.getSettings().mouseReturnDelay).toBe(MOUSE_RETURN_DELAY_MAX)
+    })
+
+    it('should migrate invalid stored values to safe defaults', () => {
+      mockStore.set('settings', {
+        mouseLeaveAction: 'unknown',
+        mouseLeaveDelay: '5000'
+      })
+
+      expect(manager.getSettings().mouseLeaveAction).toBe(DEFAULT_MOUSE_LEAVE_ACTION)
+      expect(manager.getSettings().mouseLeaveDelay).toBe(DEFAULT_MOUSE_LEAVE_QUIT_DELAY)
+      expect(manager.getSettings().mouseReturnDelay).toBe(DEFAULT_MOUSE_RETURN_DELAY)
+    })
+
+    it('should persist defaults and legacy theme migration after reading settings', () => {
+      mockStore.set('settings', { disguiseTheme: 'code-editor' })
+
+      expect(manager.getSettings().disguiseTheme).toBe('code')
+      expect(mockStore.get('settings', {}).disguiseTheme).toBe('code')
+      expect(mockStore.get('settings', {}).mouseLeaveAction).toBe(DEFAULT_MOUSE_LEAVE_ACTION)
+      expect(mockStore.get('settings', {}).mouseLeaveDelay).toBe(DEFAULT_MOUSE_LEAVE_QUIT_DELAY)
+      expect(mockStore.get('settings', {}).mouseReturnDelay).toBe(DEFAULT_MOUSE_RETURN_DELAY)
     })
   })
 
@@ -251,6 +314,9 @@ describe('SettingsManager', () => {
         disguiseTheme: 'dark',
         stealthEnabled: true,
         hideShortcut: DEFAULT_HIDE_SHORTCUT,
+        mouseLeaveAction: DEFAULT_MOUSE_LEAVE_ACTION,
+        mouseLeaveDelay: DEFAULT_MOUSE_LEAVE_QUIT_DELAY,
+        mouseReturnDelay: DEFAULT_MOUSE_RETURN_DELAY,
         autoSaveInterval: AUTO_SAVE_INTERVAL
       })
     })

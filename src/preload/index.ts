@@ -22,12 +22,21 @@ function subscribe(
 }
 
 const api: MoyuApi = {
+  window: {
+    drag: {
+      start: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_DRAG_START),
+      moveBy: (deltaX, deltaY) =>
+        ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MOVE_BY, deltaX, deltaY),
+      end: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_DRAG_END)
+    }
+  },
   file: {
     import: () => ipcRenderer.invoke(IPC_CHANNELS.FILE_IMPORT),
     importMany: () => ipcRenderer.invoke(IPC_CHANNELS.FILE_IMPORT_MANY)
   },
   bookshelf: {
     getAll: () => ipcRenderer.invoke(IPC_CHANNELS.BOOKSHELF_GET_ALL),
+    getLibrary: () => ipcRenderer.invoke(IPC_CHANNELS.BOOKSHELF_GET_LIBRARY),
     remove: (bookId) => ipcRenderer.invoke(IPC_CHANNELS.BOOKSHELF_REMOVE, bookId),
     updateProgress: (bookId, progress) =>
       ipcRenderer.invoke(IPC_CHANNELS.BOOKSHELF_UPDATE_PROGRESS, bookId, progress),
@@ -63,7 +72,13 @@ const api: MoyuApi = {
     setDisguiseTheme: (theme) =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_DISGUISE_THEME, theme),
     setStealthEnabled: (enabled) =>
-      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_STEALTH_ENABLED, enabled)
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_STEALTH_ENABLED, enabled),
+    setMouseLeaveAction: (action) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_ACTION, action),
+    setMouseLeaveDelay: (delay) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_MOUSE_LEAVE_DELAY, delay),
+    setMouseReturnDelay: (delay) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_MOUSE_RETURN_DELAY, delay)
   },
   stealth: {
     setDisguise: (theme) =>

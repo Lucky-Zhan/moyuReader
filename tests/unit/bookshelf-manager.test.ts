@@ -139,6 +139,51 @@ describe('BookshelfManager', () => {
       expect(book.chapters[0].type).toBe('chapter')
       expect(book.chapters[1].title).toBe('第311章 后续标题')
     })
+
+    it('should rebuild legacy chapter metadata after a parser upgrade', () => {
+      const content = [
+        '第1章 开始',
+        '3.9级的身体素质，正文中的小数。',
+        '1、达到黄金段位，奖励5万蓝星币。',
+        '第2章 继续',
+        '第3章 结束'
+      ].join('\n')
+      const meta = manager.addBook(createSampleBookData({ content, fileSize: content.length }), [
+        { title: '第1章', offset: 0, length: 20 },
+        { title: '1、达到黄金段位，奖励5万蓝星币。', offset: content.indexOf('1、'), length: 20 },
+        { title: '第2章', offset: content.indexOf('第2章'), length: 20 },
+        { title: '第3章', offset: content.indexOf('第3章'), length: 20 }
+      ])
+
+      const storedBooks = mockStore.get('books', []) as any[]
+      delete storedBooks[0].chapterParserVersion
+      mockStore.set('books', storedBooks)
+      mockStore.set('progress', {
+        [meta.id]: { chapterIndex: 1, scrollPosition: 18, percentage: 20 }
+      })
+      mockStore.set('bookmarks', {
+        [meta.id]: [{
+          id: 'bookmark-1',
+          bookId: meta.id,
+          chapterIndex: 2,
+          scrollPosition: 8,
+          percentage: 40,
+          title: '第2章',
+          excerpt: '继续',
+          createdAt: 1
+        }]
+      })
+
+      const books = manager.getAllBooks()
+      expect(books[0].chapters.map((chapter) => chapter.title)).toEqual([
+        '第1章 开始',
+        '第2章 继续',
+        '第3章 结束'
+      ])
+      expect(books[0].chapterParserVersion).toBeDefined()
+      expect((mockStore.get('progress', {}) as any)[meta.id].chapterIndex).toBe(0)
+      expect((mockStore.get('bookmarks', {}) as any)[meta.id][0].chapterIndex).toBe(1)
+    })
   })
 
   describe('addBook()', () => {
@@ -158,14 +203,16 @@ describe('BookshelfManager', () => {
       expect(meta.lastReadAt).toBeGreaterThan(0)
     })
 
-    it('should store small file content in electron-store', () => {
+    it('should keep small file content out of electron-store', () => {
       const bookData = createSampleBookData({ fileSize: 1000 })
       const chapters = createSampleChapters()
 
       const meta = manager.addBook(bookData, chapters)
 
+      // 正文一律走独立文件：内联进 store 会让每次导入都重写全部书籍的 JSON。
       const fileContents = mockStore.get('fileContents', {})
-      expect(fileContents[meta.id]).toBe(bookData.content)
+      expect(fileContents[meta.id]).toBeUndefined()
+      expect(manager.getBookContent(meta.id)).toBe(bookData.content)
     })
 
     it('should store large file content in separate file', () => {
@@ -192,6 +239,25 @@ describe('BookshelfManager', () => {
       const meta = manager.addBook(bookData, createSampleChapters())
 
       expect(manager.getBookContent(meta.id)).toBe(largeContent)
+    })
+
+    it('migrates legacy inline content to a file on first read', () => {
+      const bookData = createSampleBookData({ fileSize: 1000 })
+      const meta = manager.addBook(bookData, createSampleChapters())
+
+      // 模拟旧版本数据：正文内联在 store 里，独立文件不存在。
+      delete mockFiles[`/tmp/test-app-data/books/${meta.id}.txt`]
+      const legacyStore = mockStore as any
+      legacyStore.set('fileContents', { [meta.id]: '旧版本内联正文' })
+      const reloaded = new BookshelfManager(legacyStore)
+
+      expect(reloaded.getBookContent(meta.id)).toBe('旧版本内联正文')
+
+      // 迁移后内联数据被清掉，后续读取走文件。
+      const fileContents = legacyStore.get('fileContents', {})
+      expect(fileContents[meta.id]).toBeUndefined()
+      expect(mockFiles[`/tmp/test-app-data/books/${meta.id}.txt`]).toBe('旧版本内联正文')
+      expect(reloaded.getBookContent(meta.id)).toBe('旧版本内联正文')
     })
 
     it('should generate unique IDs for each book', () => {

@@ -143,6 +143,39 @@ describe('FileImporter - 编码检测与文件读取', () => {
       }
     })
 
+    it('应无损读取含 4 字节序列的 GB18030 文件', async () => {
+      // GB18030 是 GBK 的超集：这些生僻字在 GBK 中不存在，若用 gbk 解码会
+      // 变成 U+FFFD 乱码。回归见 iconv.decode(..., 'gb18030')。
+      const rare = '𠀀㐀𡃁'
+      const text = `第一章 生僻字\n${rare}\n正文内容。`
+      const buffer = iconv.encode(text, 'gb18030')
+      const filePath = path.join(tmpDir, 'gb18030-novel.txt')
+      fs.writeFileSync(filePath, buffer)
+
+      const result = await importer.readFileContentAsync(filePath)
+      expect('content' in result).toBe(true)
+      if ('content' in result) {
+        expect(result.content).toBe(text)
+        expect(result.content).not.toContain('\uFFFD')
+        expect(result.content).toContain(rare)
+      }
+    })
+
+    it('同步读取同样不丢失 GB18030 的 4 字节字符', () => {
+      const rare = '𠀀㐀𡃁'
+      const text = `生僻字测试\n${rare}\n结束。`
+      const buffer = iconv.encode(text, 'gb18030')
+      const filePath = path.join(tmpDir, 'gb18030-sync.txt')
+      fs.writeFileSync(filePath, buffer)
+
+      const result = importer.readFileContent(filePath)
+      expect('content' in result).toBe(true)
+      if ('content' in result) {
+        expect(result.content).toBe(text)
+        expect(result.content).not.toContain('\uFFFD')
+      }
+    })
+
     it('应对不支持的编码异步返回错误', async () => {
       const text = '这是UTF-16编码'
       const buffer = Buffer.alloc(2 + text.length * 2)

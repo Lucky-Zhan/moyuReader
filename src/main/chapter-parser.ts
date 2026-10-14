@@ -1,30 +1,54 @@
 import { Chapter } from '../shared/types'
 import { CHAPTER_SEGMENT_LENGTH } from '../shared/constants'
+import {
+  CHAPTER_PATTERNS,
+  VOLUME_NUMBER_SOURCE,
+  getChapterType
+} from '../shared/chapter-patterns'
 
-const VOLUME_NUMBER_SOURCE = '一二三四五六七八九十百千万零〇两\\d０-９'
 const DIGIT_NUMBER_SOURCE = '\\d０-９'
 
 /**
- * 章节标题匹配模式
- * - 中文章节："第X章" / "第X节" / "第X回" / "第X部"
- * - 卷标题："卷X" / "第X卷 标题"
- * - 英文章节："Chapter N" / "Volume N" / "Part N"
- * - 数字序号："1、标题" / "1. 标题" / "1 标题"
- *
- * 中文网络小说常用顿号（、）连接数字和标题，必须与英文句点、全角句点
- * 分开匹配，避免把正文中的普通数字误判成章节。
+ * 持久化章节元数据的解析器版本。
+ * 提升版本后，书架管理器会在首次读取书籍时用新规则重建目录。
  */
-const CHAPTER_PATTERNS: RegExp[] = [
-  new RegExp(`^第[${VOLUME_NUMBER_SOURCE}]+[章节回部集篇](?:$|[\\s：:、.．·\\-—])`),
-  new RegExp(`^第[${VOLUME_NUMBER_SOURCE}]+卷(?:$|[\\s：:、.．·\\-—])`),
-  new RegExp(`^卷[${VOLUME_NUMBER_SOURCE}]+`),
-  /^Chapter\s*\d+/i,
-  /^Volume\s*\d+/i,
-  /^Part\s*\d+/i,
-  new RegExp(`^[${DIGIT_NUMBER_SOURCE}]+[、.．]\\s*\\S+`),
-  /^[０-９\d]+[.．]\s*\S+/,
-  /^[０-９\d]+\s+\S+/
-]
+export const CHAPTER_PARSER_VERSION = 3
+
+interface ChapterCandidate {
+  chapter: Chapter
+  patternIndex: number
+  lineIndex: number
+}
+
+/** 一行文本及其在原文中的起始偏移。 */
+interface LineSlice {
+  text: string
+  start: number
+}
+
+/**
+ * 按行切分文本，同时记录每行的真实起始偏移。
+ *
+ * 不能用 `content.split('\n')` 配合 `offset += line.length + 1` 累加偏移：
+ * Windows 换行是 `\r\n`，那样每行会多算一个字符，章节 offset 会逐渐漂移，
+ * 最终落在换行符而不是标题开头，导致跳转后正文错位。
+ */
+function splitLines(content: string): LineSlice[] {
+  const lines: LineSlice[] = []
+  let start = 0
+
+  for (let index = 0; index < content.length; index++) {
+    if (content.charCodeAt(index) !== 10) continue
+
+    // 行内容不含 CR/LF，偏移仍指向该行在原文中的真实起点。
+    const end = index > start && content.charCodeAt(index - 1) === 13 ? index - 1 : index
+    lines.push({ text: content.slice(start, end), start })
+    start = index + 1
+  }
+
+  lines.push({ text: content.slice(start), start })
+  return lines
+}
 
 interface VolumeBoundary {
   /** 边界关联的卷序号 */
@@ -87,12 +111,12 @@ export class ChapterParser {
    * 普通“第X卷 标题”仍保留为 volume 条目以兼容已有文本格式。
    */
   private matchChapterPatterns(content: string): ParsedChapters {
-    const chapters: Chapter[] = []
+    const candidates: ChapterCandidate[] = []
     const volumeBoundaries: VolumeBoundary[] = []
-    const lines = content.split('\n')
-    let offset = 0
+    const lines = splitLines(content)
 
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const { text: line, start: offset } = lines[lineIndex]
       const trimmedLine = line.trimStart()
       const leadingSpaces = line.length - trimmedLine.length
       const title = trimmedLine.trimEnd()
@@ -105,22 +129,22 @@ export class ChapterParser {
           offset: lineOffset,
           kind: 'end'
         })
-        offset += line.length + 1
         continue
       }
 
-      for (const pattern of CHAPTER_PATTERNS) {
+      for (let patternIndex = 0; patternIndex < CHAPTER_PATTERNS.length; patternIndex++) {
+        const pattern = CHAPTER_PATTERNS[patternIndex]
         if (!pattern.test(trimmedLine)) {
           continue
         }
 
         const chapter: Chapter = {
           title,
-          type: this.getChapterType(title),
+          type: getChapterType(title),
           offset: lineOffset,
           length: 0
         }
-        chapters.push(chapter)
+        candidates.push({ chapter, patternIndex, lineIndex })
 
         const inlineVolumeEnd = this.parseInlineVolumeCompletion(title)
         if (inlineVolumeEnd) {
@@ -141,12 +165,48 @@ export class ChapterParser {
         }
         break // 一行只匹配一个模式
       }
-
-      // 偏移量累加：当前行长度 + 换行符
-      offset += line.length + 1
     }
 
+    // 数字序号模式（pattern 7/8）风险最高：正文里“3 个人走进了房间”这类句子
+    // 会被误判成章节，而“1、标题 / 2、标题”又确实是常见目录格式。因此只在
+    // 空格分隔形态上做严格判定，其余形态保留原有兼容性。
+    const chapters = candidates
+      .filter((candidate) => {
+        if (candidate.patternIndex < 6) return true
+        return !this.isLikelyNumericBodyLine(candidate.chapter.title)
+      })
+      .map(({ chapter }) => chapter)
+
     return { chapters, volumeBoundaries }
+  }
+
+  /** 判断数字序号是否更像正文句子，而不是章节标题。 */
+  private isLikelyNumericBodyLine(title: string): boolean {
+    const match = title.match(/^([０-９\d]+)(、|[.．]|\s)\s*(.*)$/)
+    if (!match) return false
+
+    const number = Number(match[1].replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xff10 + 0x30)))
+    const suffix = match[3].trim()
+    if (!Number.isSafeInteger(number) || number <= 0) return false
+
+    // 句点后紧跟数字的小数已经由匹配规则排除，这里保留二次保护，避免
+    // 后续新增数字模式时再次把“3.9级”纳入目录。
+    if ((match[2] === '.' || match[2] === '．') && /^\d/.test(suffix)) return true
+
+    // “姓名：分数/数值”这类榜单行通常没有句末标点，但明显不是章节标题。
+    if (/[：:]\s*[０-９\d]+/.test(suffix)) return true
+
+    // 空格分隔的数字开头（pattern 8）最容易被正文句子命中：“3 个人走进了房间，
+    // 他们分别是甲、乙、丙。”。真实目录用空格分隔时标题都很短，且不会出现
+    // 句中标点，因此这里只对空格形态做严格判定。
+    if (match[2] === ' ') {
+      if (/[，,；;：:]/.test(suffix) || suffix.length > 30) return true
+    }
+
+    // 以句号、分号或感叹号收尾的数字条目更符合说明/列表语气。
+    if (/[。！？；.!?;]$/.test(suffix)) return true
+
+    return false
   }
 
   /**
@@ -272,13 +332,6 @@ export class ChapterParser {
     }
 
     return chapters
-  }
-
-  private getChapterType(title: string): Chapter['type'] {
-    if (new RegExp(`^第[${VOLUME_NUMBER_SOURCE}]+[卷部集篇]|^卷[${VOLUME_NUMBER_SOURCE}]+|^Volume\\s*\\d+|^Part\\s*\\d+`, 'i').test(title)) {
-      return 'volume'
-    }
-    return 'chapter'
   }
 }
 
