@@ -610,6 +610,34 @@ describe('BookshelfManager', () => {
       expect(manager.searchBook('missing', '苹果')).toEqual([])
       expect(manager.searchBook('missing', '   ')).toEqual([])
     })
+
+    it('should keep offsets aligned when content contains length-changing lowercase chars', () => {
+      // 'İ'.toLowerCase() 是 'i̇'（1 个码元变 2 个）。若直接对全文做小写再
+      // indexOf，后续所有命中的下标都会与原文错位，摘要和跳转位置随之出错。
+      const content = 'İabc 开头\n目标词在这里。'
+      const meta = manager.addBook(
+        createSampleBookData({ content, fileSize: 1000 }),
+        [{ title: 'İabc 开头', offset: 0, length: content.length }]
+      )
+
+      const results = manager.searchBook(meta.id, '目标词')
+
+      expect(results).toHaveLength(1)
+      // absoluteOffset 必须精确指向原文中的命中位置。
+      const { absoluteOffset } = results[0]
+      expect(content.slice(absoluteOffset, absoluteOffset + 3)).toBe('目标词')
+    })
+
+    it('should match ASCII case-insensitively', () => {
+      const content = 'Chapter One\nHello World here.'
+      const meta = manager.addBook(
+        createSampleBookData({ content, fileSize: 1000 }),
+        [{ title: 'Chapter One', offset: 0, length: content.length }]
+      )
+
+      expect(manager.searchBook(meta.id, 'hello')).toHaveLength(1)
+      expect(manager.searchBook(meta.id, 'WORLD')).toHaveLength(1)
+    })
   })
 
   describe('bookmarks', () => {

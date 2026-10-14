@@ -7,14 +7,11 @@ import * as os from 'os'
 vi.mock('electron', () => ({
   dialog: {
     showOpenDialog: vi.fn()
-  },
-  ipcMain: {
-    handle: vi.fn()
   }
 }))
 
-import { dialog, ipcMain } from 'electron'
-import { FileImporter, registerFileImportHandler } from '../../src/main/file-importer'
+import { dialog } from 'electron'
+import { FileImporter } from '../../src/main/file-importer'
 
 describe('FileImporter - importFile 完整流程', () => {
   const importer = new FileImporter()
@@ -142,46 +139,5 @@ describe('FileImporter - importFile 完整流程', () => {
     const result = await importer.importFiles()
 
     expect(result).toEqual([])
-  })
-})
-
-describe('registerFileImportHandler - IPC handler 注册', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('应注册 file:import 通道的 handler', () => {
-    const importer = new FileImporter()
-    registerFileImportHandler(importer, () => true)
-
-    expect(ipcMain.handle).toHaveBeenCalledWith('file:import', expect.any(Function))
-  })
-
-  it('注册的 handler 应调用 importFile 方法', async () => {
-    const importer = new FileImporter()
-    const mockImportResult = { success: false }
-    vi.spyOn(importer, 'importFile').mockResolvedValue(mockImportResult)
-
-    registerFileImportHandler(importer, () => true)
-
-    // 获取注册的 handler 函数并调用
-    const handlerCall = vi.mocked(ipcMain.handle).mock.calls[0]
-    const handler = handlerCall[1] as (event: unknown) => Promise<unknown>
-    const result = await handler({})
-
-    expect(importer.importFile).toHaveBeenCalled()
-    expect(result).toBe(mockImportResult)
-  })
-
-  it('不可信来源不应打开文件选择器', async () => {
-    const importer = new FileImporter()
-    const importSpy = vi.spyOn(importer, 'importFile')
-    registerFileImportHandler(importer, () => false)
-
-    const handlerCall = vi.mocked(ipcMain.handle).mock.calls[0]
-    const handler = handlerCall[1] as (event: unknown) => Promise<unknown>
-
-    await expect(handler({})).rejects.toThrow('untrusted sender')
-    expect(importSpy).not.toHaveBeenCalled()
   })
 })

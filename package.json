@@ -26,6 +26,7 @@
     "iconv-lite": "^0.6.3"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@testing-library/react": "^14.3.1",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
@@ -60,9 +61,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "notarize": true,
       "artifactName": "${productName}-${version}-mac.${ext}"
     },
+    "afterSign": "scripts/notarize.cjs",
     "win": {
       "target": [
         "nsis",

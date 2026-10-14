@@ -1,15 +1,27 @@
 import * as path from 'path'
 import * as fs from 'fs'
-import { dialog, ipcMain } from 'electron'
+import { dialog } from 'electron'
 import chardet from 'chardet'
 import * as iconv from 'iconv-lite'
 import { EncodingType, ImportError, ImportResult, BookData } from '../shared/types'
 import { MAX_FILE_SIZE } from '../shared/constants'
-import { IPC_CHANNELS } from '../shared/ipc-channels'
-import { assertTrustedIpcSender, type IpcSenderValidator } from './ipc-security'
 
 /** GBK 系列编码名称（chardet 可能返回的变体） */
 const GBK_ENCODINGS = ['gb18030', 'gb2312', 'gbk', 'euc-cn', 'chinese']
+
+/** UTF-8 / UTF-16 字节序标记（U+FEFF） */
+const BYTE_ORDER_MARK = '\uFEFF'
+
+/**
+ * 去掉文本开头的 BOM。
+ *
+ * 很多 Windows 下的 TXT 编辑器会写入 UTF-8 BOM。chardet 仍会正确识别成
+ * UTF-8，但解码后字符串首字符是 U+FEFF：它不可见，却会污染第一章标题，
+ * 并让「首行是否等于章节标题」这类比较莫名失败。这里在解码后统一剥掉。
+ */
+function stripByteOrderMark(content: string): string {
+  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+}
 
 /**
  * 文件导入器
@@ -101,6 +113,24 @@ export class FileImporter {
   }
 
   /**
+   * 把文件 Buffer 解码成文本。
+   *
+   * 同步/异步两条读取路径共用这一份逻辑，避免解码规则（尤其是 gb18030 与
+   * BOM 处理）在两边各写一遍后逐渐分叉。
+   */
+  private decodeBuffer(buffer: Buffer, encoding: EncodingType): string {
+    const content =
+      encoding === 'utf-8'
+        ? buffer.toString('utf-8')
+        : // 用 gb18030 而不是 gbk 解码：GB18030 是 GBK 的超集，GBK 无法解码
+          // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
+          // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
+          iconv.decode(buffer, 'gb18030')
+
+    return stripByteOrderMark(content)
+  }
+
+  /**
    * 读取文件并解码内容
    * 1. 读取文件为 Buffer
    * 2. 使用 chardet 检测编码
@@ -121,17 +151,7 @@ export class FileImporter {
       }
     }
 
-    let content: string
-    if (encoding === 'utf-8') {
-      content = buffer.toString('utf-8')
-    } else {
-      // 用 gb18030 而不是 gbk 解码：GB18030 是 GBK 的超集，GBK 无法解码
-      // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
-      // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
-      content = iconv.decode(buffer, 'gb18030')
-    }
-
-    return { content, encoding }
+    return { content: this.decodeBuffer(buffer, encoding), encoding }
   }
 
   /**
@@ -151,17 +171,7 @@ export class FileImporter {
       }
     }
 
-    let content: string
-    if (encoding === 'utf-8') {
-      content = buffer.toString('utf-8')
-    } else {
-      // 用 gb18030 而不是 gbk 解码：GB18030 是 GBK 的超集，GBK 无法解码
-      // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
-      // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
-      content = iconv.decode(buffer, 'gb18030')
-    }
-
-    return { content, encoding }
+    return { content: this.decodeBuffer(buffer, encoding), encoding }
   }
 
   /**
@@ -242,18 +252,4 @@ export class FileImporter {
 
     return { success: true, book: bookData }
   }
-}
-
-/**
- * 注册文件导入 IPC handler
- * 将 file:import 通道绑定到 FileImporter 实例的 importFile 方法
- */
-export function registerFileImportHandler(
-  fileImporter: FileImporter,
-  isTrustedSender: IpcSenderValidator
-): void {
-  ipcMain.handle(IPC_CHANNELS.FILE_IMPORT, async (event) => {
-    assertTrustedIpcSender(event, isTrustedSender)
-    return fileImporter.importFile()
-  })
 }

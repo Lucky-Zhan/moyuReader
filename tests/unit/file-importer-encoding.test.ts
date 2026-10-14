@@ -74,6 +74,40 @@ describe('FileImporter - 编码检测与文件读取', () => {
       }
     })
 
+    it('应剥离 UTF-8 BOM，避免首字符污染第一章标题', () => {
+      const text = '第一章 开始\n这是一本带 BOM 的测试小说。'
+      const filePath = path.join(tmpDir, 'utf8-bom-novel.txt')
+      // Windows 记事本默认会写入 UTF-8 BOM。
+      fs.writeFileSync(
+        filePath,
+        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, 'utf-8')])
+      )
+
+      const result = importer.readFileContent(filePath)
+      expect('content' in result).toBe(true)
+      if ('content' in result) {
+        expect(result.content).toBe(text)
+        expect(result.content.charCodeAt(0)).not.toBe(0xfeff)
+        expect(result.encoding).toBe('utf-8')
+      }
+    })
+
+    it('异步读取同样应剥离 UTF-8 BOM', async () => {
+      const text = '第一章 开始\n异步读取的带 BOM 文件。'
+      const filePath = path.join(tmpDir, 'utf8-bom-async.txt')
+      fs.writeFileSync(
+        filePath,
+        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, 'utf-8')])
+      )
+
+      const result = await importer.readFileContentAsync(filePath)
+      expect('content' in result).toBe(true)
+      if ('content' in result) {
+        expect(result.content).toBe(text)
+        expect(result.content.charCodeAt(0)).not.toBe(0xfeff)
+      }
+    })
+
     it('应对不支持的编码返回 UNSUPPORTED_ENCODING 错误', () => {
       // Create a file with UTF-16LE BOM that chardet should detect as non-UTF8/GBK
       const text = '这是UTF-16编码的文本'

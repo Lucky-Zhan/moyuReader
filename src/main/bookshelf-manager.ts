@@ -249,8 +249,12 @@ export class BookshelfManager {
     const content = this.getBookContent(bookId)
     if (content === null) return []
 
-    const lowerContent = content.toLocaleLowerCase()
-    const lowerQuery = normalizedQuery.toLocaleLowerCase()
+    // 必须用「长度不变」的小写映射。
+    // toLocaleLowerCase/toLowerCase 会把 'İ' 变成 'i̇'（长度 1 → 2），
+    // 于是 lowerContent 的下标与原文错位：搜到的位置会指向别的字符，
+    // 摘要和跳转偏移全部偏移。这里逐字符小写，只取长度仍为 1 的结果。
+    const lowerContent = toLengthPreservingLowerCase(content)
+    const lowerQuery = toLengthPreservingLowerCase(normalizedQuery)
     const results: SearchResult[] = []
     let fromIndex = 0
 
@@ -734,4 +738,21 @@ export class BookshelfManager {
  */
 function isSafeBookId(id: string): boolean {
   return id.length > 0 && id.length <= 200 && /^[A-Za-z0-9._-]+$/.test(id) && !id.includes('..')
+}
+
+/**
+ * 逐字符小写，保证结果与输入**等长**。
+ *
+ * 搜索依赖「小写文本的下标 == 原文的下标」。但 JS 的 toLowerCase 对少数
+ * 字符会改变长度（'İ' → 'i̇'，1 个码元变 2 个），一旦正文里出现这类字符，
+ * 后续所有命中的 offset 都会错位，摘要与跳转位置随之出错。
+ * 这里只在长度不变时采用小写结果，否则保留原字符。
+ */
+function toLengthPreservingLowerCase(text: string): string {
+  let result = ''
+  for (const char of text) {
+    const lower = char.toLowerCase()
+    result += lower.length === char.length ? lower : char
+  }
+  return result
 }
