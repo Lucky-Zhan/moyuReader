@@ -62,11 +62,27 @@ export class ProgressStore {
     return this.data
   }
 
-  /** 原子落盘。 */
+  /**
+   * 落盘。
+   *
+   * 优先用「临时文件 + rename」做原子替换，避免进程中途退出留下半个文件。
+   * 但 Windows 上 rename 到**已存在**的目标会抛 EPERM/EEXIST（POSIX 允许
+   * 覆盖），而本方法从第二次写入起目标必然已存在，因此必须回退：
+   * 直接覆盖写目标文件。代价是极端情况下可能写到一半，但进度数据本身
+   * 可重建，可用性优先于原子性。
+   */
   private persist(): void {
     const payload = JSON.stringify(this.load())
-    writeFileSync(this.tmpPath, payload, 'utf-8')
-    renameSync(this.tmpPath, this.filePath)
+
+    try {
+      writeFileSync(this.tmpPath, payload, 'utf-8')
+      renameSync(this.tmpPath, this.filePath)
+      return
+    } catch {
+      // 回退：清理临时文件后直接覆盖写。
+    }
+
+    writeFileSync(this.filePath, payload, 'utf-8')
   }
 
   getProgress(bookId: string): ReadingProgress | null {
