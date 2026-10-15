@@ -462,3 +462,31 @@
     background: color-mix(in srgb, var(--hover-bg) 58%, transparent);
   }
 }
+
+/*
+ * Portal 内容的主题变量重算。
+ *
+ * MUI 的 Portal（Popper / Dialog / Snackbar）把内容渲染到 <body> 下，
+ * 而 tokens.css 里的派生变量（--material-popover 等）定义在 :root 上，
+ * 其值在 :root 处就已按默认 --menu-bg 计算完毕——body 上的 .theme-* 无法
+ * 回溯改变它。实测后果：终端主题下排版面板底色是默认白色，伪装失效。
+ *
+ * 这里在每个主题类下重新声明这些派生变量，让它们在 body 处按当前主题
+ * 的 --menu-bg / --app-bg 重新计算。App 会把主题类名同步到 body。
+ */
+.theme-dark,
+.theme-light,
+.theme-paper,
+.theme-code,
+.theme-terminal {
+  --surface-popover: var(--menu-bg);
+  --material-popover: color-mix(in srgb, var(--menu-bg) 96%, transparent);
+  --material-glass: color-mix(in srgb, var(--app-bg) 82%, transparent);
+  --ink-primary: var(--text);
+  --ink-secondary: var(--muted);
+  --ink-tertiary: color-mix(in srgb, var(--muted) 72%, transparent);
+  --surface-canvas: var(--app-bg);
+  --surface-control-hover: var(--hover-bg);
+  --surface-control-active: var(--active-bg);
+  --separator: var(--border);
+}

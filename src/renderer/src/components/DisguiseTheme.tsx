@@ -79,9 +79,11 @@ export function DisguiseTheme({
     <ReaderPopover
       open={open}
       onOpenChange={setOpen}
-      className="disguise-theme-selector reader-popover--right"
+      className="disguise-theme-selector"
       panelClassName="disguise-theme-menu"
       ariaLabel="阅读设置菜单"
+      // 该触发器在工具栏最右侧，面板需右对齐，否则会溢出窗口。
+      anchor="end"
       trigger={(triggerProps) => (
         <button
           className="disguise-theme-trigger"

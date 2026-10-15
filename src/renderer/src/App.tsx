@@ -566,6 +566,18 @@ function App(): JSX.Element {
   // 否则会露出「这是网页应用」的破绽。
   const muiTheme = useMuiTheme(disguiseTheme)
 
+  // 把主题类名同步到 <body>。
+  //
+  // MUI 的 Portal（Popover / Popper / Dialog / Snackbar）把内容渲染到 body 下，
+  // 而 .theme-* 只加在 .app 上，于是这些浮层拿不到主题变量——实测终端主题下
+  // 排版面板底色解析成 --material-popover 的默认白色，伪装当场失效。
+  // 在 body 上再挂一次主题类名，Portal 内容即可继承正确的变量。
+  useEffect(() => {
+    const className = getThemeClassName(disguiseTheme)
+    document.body.classList.add(className)
+    return () => document.body.classList.remove(className)
+  }, [disguiseTheme])
+
   return (
     <ThemeProvider theme={muiTheme}>
       <div

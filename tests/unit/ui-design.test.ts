@@ -210,3 +210,69 @@ describe('目录抽屉的滚动区域', () => {
     expect(rule).not.toMatch(/backdrop-filter/)
   })
 })
+
+describe('工具栏控件的一致性', () => {
+  /**
+   * 实测（真机 CDP 量取）发现的真实不一致：
+   * 4 个字号/行距步进按钮渲染成 29x29，而其余 9 个图标按钮是 34x34，
+   * 同一排里大小不一。根因是 .reader-font-btn 用了 --control-height-sm。
+   */
+  it('字号/行距步进按钮与其他图标按钮同高', () => {
+    const rule = readerCss
+      .match(/^\.reader-font-btn \{[^}]*\}/m)?.[0]
+      ?.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(rule).toBeTruthy()
+    expect(rule).toMatch(/width:\s*var\(--control-height\)/)
+    expect(rule).toMatch(/height:\s*var\(--control-height\)/)
+    // 不能再用小一号的 token，否则又会退回 29px。
+    expect(rule).not.toMatch(/--control-height-sm/)
+  })
+
+  it('字号/行距步进按钮与其他图标按钮同圆角', () => {
+    const rule = readerCss
+      .match(/^\.reader-font-btn \{[^}]*\}/m)?.[0]
+      ?.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(rule).toMatch(/border-radius:\s*var\(--control-radius\)/)
+    // 此前是 --control-radius-sm（8px），与 .reader-icon-btn 的 10px 不一致。
+    expect(rule).not.toMatch(/--control-radius-sm/)
+  })
+
+  it('排版面板的标签不用最小字号', () => {
+    for (const cls of ['.reader-popover-label', '.reader-font-size-display']) {
+      const rule = readerCss
+        .match(new RegExp(`^\\${cls} \\{[^}]*\\}`, 'm'))?.[0]
+        ?.replace(/\/\*[\s\S]*?\*\//g, '')
+      expect(rule, `${cls} 规则应存在`).toBeTruthy()
+      // 11px（--text-2xs）在桌面端偏小，排版面板是高频查看的控件。
+      expect(rule).toMatch(/font-size:\s*var\(--text-xs\)/)
+      expect(rule).not.toMatch(/--text-2xs/)
+    }
+  })
+})
+
+describe('Portal 浮层的主题变量', () => {
+  /**
+   * 实测回归：MUI 的 Portal（Popper/Dialog/Snackbar）把内容渲染到 body 下，
+   * 而 tokens.css 的派生变量定义在 :root 上，其值在 :root 处就按默认
+   * --menu-bg 算完了，body 上的 .theme-* 无法回溯改变它。
+   * 后果：终端主题下排版面板底色是默认白色，伪装失效。
+   */
+  it('主题类下重新声明 Portal 用到的派生变量', () => {
+    const block = themeCss.match(
+      /\.theme-dark,\s*\.theme-light,\s*\.theme-paper,\s*\.theme-code,\s*\.theme-terminal \{[^}]*\}/
+    )?.[0]
+    expect(block, '应存在覆盖五套主题的派生变量块').toBeTruthy()
+    // 关键：--material-popover 必须按当前主题的 --menu-bg 重算
+    expect(block).toMatch(/--material-popover:\s*color-mix\(in srgb,\s*var\(--menu-bg\)/)
+    expect(block).toMatch(/--surface-popover:\s*var\(--menu-bg\)/)
+    // 文字色也要重算，否则浮层文字仍是默认深色
+    expect(block).toMatch(/--ink-primary:\s*var\(--text\)/)
+    expect(block).toMatch(/--ink-secondary:\s*var\(--muted\)/)
+  })
+
+  it('App 把主题类名同步到 body 供 Portal 继承', () => {
+    const app = read('src/renderer/src/App.tsx')
+    expect(app).toMatch(/document\.body\.classList\.add\(className\)/)
+    expect(app).toMatch(/document\.body\.classList\.remove\(className\)/)
+  })
+})
