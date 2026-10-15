@@ -44,7 +44,24 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
     resolve: {
-      alias: rendererAlias
+      alias: rendererAlias,
+      // 确保 React 与 MUI/Emotion 解析到同一份实例。
+      // 缺少 dedupe 时 dev 预打包会把 React 拆进不同 chunk，
+      // 运行时出现「Invalid hook call / 多个 React 副本」并白屏。
+      dedupe: ['react', 'react-dom', '@emotion/react', '@emotion/styled']
+    },
+    optimizeDeps: {
+      // 让 Vite 把 React 与 MUI/Emotion 一起预打包，避免各自内联一份 React。
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        '@emotion/react',
+        '@emotion/styled',
+        '@mui/material',
+        '@mui/material/styles'
+      ]
     },
     build: {
       rollupOptions: {

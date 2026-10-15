@@ -24,6 +24,9 @@
     "dist:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^9.5.0",
     "chardet": "^2.0.0",
     "electron-store": "^8.2.0",
     "iconv-lite": "^0.6.3"

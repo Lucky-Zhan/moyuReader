@@ -15,6 +15,8 @@ import { ReaderView } from './components/ReaderView'
 import ChapterDrawer from './components/ChapterDrawer'
 import { DisguiseTheme, getThemeClassName } from './components/DisguiseTheme'
 import Toast from './components/Toast'
+import { ThemeProvider } from '@mui/material/styles'
+import { useMuiTheme } from './theme/use-mui-theme'
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
@@ -560,69 +562,75 @@ function App(): JSX.Element {
     }
   }, [flushPendingProgress])
 
+  // MUI 主题随伪装主题重建：切换主题时对话框/菜单/Snackbar 的配色要一起变，
+  // 否则会露出「这是网页应用」的破绽。
+  const muiTheme = useMuiTheme(disguiseTheme)
+
   return (
-    <div
-      className={`app ${getThemeClassName(disguiseTheme)} ${view === 'reader' ? 'app-reading' : 'app-library'}`}
-      onMouseLeave={handleMouseLeave}
-      onMouseEnter={handleMouseEnter}
-      onPointerDown={handleWindowDragPointerDown}
-      onPointerMove={handleWindowDragPointerMove}
-      onPointerUp={handleWindowDragPointerEnd}
-      onPointerCancel={handleWindowDragPointerEnd}
-    >
-      <div className="app-drag-region" />
-      {view === 'bookshelf' && <div className="app-topbar">{disguiseThemeControl}</div>}
+    <ThemeProvider theme={muiTheme}>
+      <div
+        className={`app ${getThemeClassName(disguiseTheme)} ${view === 'reader' ? 'app-reading' : 'app-library'}`}
+        onMouseLeave={handleMouseLeave}
+        onMouseEnter={handleMouseEnter}
+        onPointerDown={handleWindowDragPointerDown}
+        onPointerMove={handleWindowDragPointerMove}
+        onPointerUp={handleWindowDragPointerEnd}
+        onPointerCancel={handleWindowDragPointerEnd}
+      >
+        <div className="app-drag-region" />
+        {view === 'bookshelf' && <div className="app-topbar">{disguiseThemeControl}</div>}
 
-      {view === 'bookshelf' && (
-        <BookshelfView onOpenBook={(bookId) => void handleOpenBook(bookId)} />
-      )}
+        {view === 'bookshelf' && (
+          <BookshelfView onOpenBook={(bookId) => void handleOpenBook(bookId)} />
+        )}
 
-      {view === 'reader' && (
-        <div className="reader-layout">
-          <div className="reader-main">
-            {currentChapterContent && (
-              <ReaderView
-                content={currentChapterContent.content}
-                chapterContent={currentChapterContent}
-                chapters={currentChapters}
-                progress={currentProgress}
-                onProgressChange={handleProgressChange}
-                onBack={handleBack}
-                onSelectChapter={handleSelectChapter}
-                onLoadChapterContent={handleLoadChapterContent}
-                onChapterVisible={handleChapterVisible}
-                searchResults={searchResults}
-                onSearch={handleSearch}
-                onSelectSearchResult={handleSelectSearchResult}
-                bookmarks={bookmarks}
-                onAddBookmark={handleAddBookmark}
-                onSelectBookmark={handleSelectBookmark}
-                onRemoveBookmark={handleRemoveBookmark}
-                targetChapterOffset={targetChapterOffset}
-                initialFontSize={fontSize}
-                initialFontFamily={fontFamily}
-                initialLineHeight={lineHeight}
-                chapterListVisible={chapterListVisible}
-                navigationKey={readerNavigationKey}
-                chapterListTriggerRef={chapterDrawerTriggerRef}
-                onToggleChapterList={() => setChapterListVisible((visible) => !visible)}
-                settingsSlot={disguiseThemeControl}
-              />
-            )}
+        {view === 'reader' && (
+          <div className="reader-layout">
+            <div className="reader-main">
+              {currentChapterContent && (
+                <ReaderView
+                  content={currentChapterContent.content}
+                  chapterContent={currentChapterContent}
+                  chapters={currentChapters}
+                  progress={currentProgress}
+                  onProgressChange={handleProgressChange}
+                  onBack={handleBack}
+                  onSelectChapter={handleSelectChapter}
+                  onLoadChapterContent={handleLoadChapterContent}
+                  onChapterVisible={handleChapterVisible}
+                  searchResults={searchResults}
+                  onSearch={handleSearch}
+                  onSelectSearchResult={handleSelectSearchResult}
+                  bookmarks={bookmarks}
+                  onAddBookmark={handleAddBookmark}
+                  onSelectBookmark={handleSelectBookmark}
+                  onRemoveBookmark={handleRemoveBookmark}
+                  targetChapterOffset={targetChapterOffset}
+                  initialFontSize={fontSize}
+                  initialFontFamily={fontFamily}
+                  initialLineHeight={lineHeight}
+                  chapterListVisible={chapterListVisible}
+                  navigationKey={readerNavigationKey}
+                  chapterListTriggerRef={chapterDrawerTriggerRef}
+                  onToggleChapterList={() => setChapterListVisible((visible) => !visible)}
+                  settingsSlot={disguiseThemeControl}
+                />
+              )}
+            </div>
+            <ChapterDrawer
+              open={chapterListVisible}
+              chapters={currentChapters}
+              currentChapterIndex={currentProgress.chapterIndex}
+              onSelectChapter={handleSelectChapter}
+              onClose={() => setChapterListVisible(false)}
+              triggerRef={chapterDrawerTriggerRef}
+            />
           </div>
-          <ChapterDrawer
-            open={chapterListVisible}
-            chapters={currentChapters}
-            currentChapterIndex={currentProgress.chapterIndex}
-            onSelectChapter={handleSelectChapter}
-            onClose={() => setChapterListVisible(false)}
-            triggerRef={chapterDrawerTriggerRef}
-          />
-        </div>
-      )}
+        )}
 
-      <Toast />
-    </div>
+        <Toast />
+      </div>
+    </ThemeProvider>
   )
 }
 
