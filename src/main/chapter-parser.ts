@@ -6,8 +6,6 @@ import {
   getChapterType
 } from '../shared/chapter-patterns'
 
-const DIGIT_NUMBER_SOURCE = '\\d０-９'
-
 /**
  * 持久化章节元数据的解析器版本。
  * 提升版本后，书架管理器会在首次读取书籍时用新规则重建目录。

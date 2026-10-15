@@ -27,7 +27,7 @@ function createMockWindow(): BrowserWindowLike & {
   title: string
   sentEvents: Array<{ channel: string; args: unknown[] }>
   bounds: { x: number; y: number; width: number; height: number }
-} {
+  } {
   const mock = {
     visible: true,
     minimized: false,
@@ -669,7 +669,7 @@ describe('StealthModeManager', () => {
       expect(mockWindow.skipTaskbar).toBe(false)
     })
 
-  it('should not restore window until cursor dwells in the return hot zone', () => {
+    it('should not restore window until cursor dwells in the return hot zone', () => {
       vi.useFakeTimers()
       manager.enableMouseTracking()
 
@@ -685,32 +685,32 @@ describe('StealthModeManager', () => {
       expect(manager.isHidden()).toBe(true)
 
       vi.advanceTimersByTime(100)
-    expect(manager.isHidden()).toBe(false)
-  })
-
-  it('should use the configured show delay for the return hot zone', () => {
-    vi.useFakeTimers()
-    const delayedShowManager = new StealthModeManager()
-    delayedShowManager.initialize(mockWindow, {
-      ...config,
-      mouseLeaveAction: 'hide',
-      mouseLeaveDelay: 0,
-      mouseReturnDelay: 5000
+      expect(manager.isHidden()).toBe(false)
     })
-    delayedShowManager.enableMouseTracking()
 
-    cursorPoint = { x: 50, y: 50 }
-    delayedShowManager.handleMouseLeave()
-    expect(delayedShowManager.isHidden()).toBe(true)
+    it('should use the configured show delay for the return hot zone', () => {
+      vi.useFakeTimers()
+      const delayedShowManager = new StealthModeManager()
+      delayedShowManager.initialize(mockWindow, {
+        ...config,
+        mouseLeaveAction: 'hide',
+        mouseLeaveDelay: 0,
+        mouseReturnDelay: 5000
+      })
+      delayedShowManager.enableMouseTracking()
 
-    cursorPoint = { x: 150, y: 150 }
-    vi.advanceTimersByTime(100)
-    vi.advanceTimersByTime(4900)
-    expect(delayedShowManager.isHidden()).toBe(true)
+      cursorPoint = { x: 50, y: 50 }
+      delayedShowManager.handleMouseLeave()
+      expect(delayedShowManager.isHidden()).toBe(true)
 
-    vi.advanceTimersByTime(100)
-    expect(delayedShowManager.isHidden()).toBe(false)
-  })
+      cursorPoint = { x: 150, y: 150 }
+      vi.advanceTimersByTime(100)
+      vi.advanceTimersByTime(4900)
+      expect(delayedShowManager.isHidden()).toBe(true)
+
+      vi.advanceTimersByTime(100)
+      expect(delayedShowManager.isHidden()).toBe(false)
+    })
 
     it('should restore window inside the margin around hidden bounds', () => {
       vi.useFakeTimers()
@@ -755,7 +755,7 @@ describe('StealthModeManager', () => {
     function createMockGlobalShortcut(): GlobalShortcutLike & {
       registeredCallbacks: Map<string, () => void>
       unregisteredKeys: string[]
-    } {
+      } {
       const mock = {
         registeredCallbacks: new Map<string, () => void>(),
         unregisteredKeys: [] as string[],
@@ -872,7 +872,7 @@ describe('StealthModeManager', () => {
     function createMockGlobalShortcut(): GlobalShortcutLike & {
       registeredCallbacks: Map<string, () => void>
       unregisteredKeys: string[]
-    } {
+      } {
       const mock = {
         registeredCallbacks: new Map<string, () => void>(),
         unregisteredKeys: [] as string[],

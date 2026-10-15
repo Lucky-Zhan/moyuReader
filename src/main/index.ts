@@ -340,23 +340,30 @@ function hardenWindow(window: BrowserWindow): void {
 }
 
 if (hasSingleInstanceLock) {
-  app.whenReady().then(() => {
-    // 进程名会出现在活动监视器、Cmd+Tab 和 macOS 菜单栏里。
-    // 打包后默认是 productName（MoyuReader），与伪装主题的窗口标题不一致，
-    // 等于在系统层面直接暴露了这是个阅读器。
-    if (process.platform === 'darwin') {
-      app.setName('workspace')
-    }
-
-    initializeApplication()
-    createWindow()
-
-    app.on('activate', () => {
-      if (!mainWindow) {
-        createWindow()
+  app
+    .whenReady()
+    .then(() => {
+      // 进程名会出现在活动监视器、Cmd+Tab 和 macOS 菜单栏里。
+      // 打包后默认是 productName（MoyuReader），与伪装主题的窗口标题不一致，
+      // 等于在系统层面直接暴露了这是个阅读器。
+      if (process.platform === 'darwin') {
+        app.setName('workspace')
       }
+
+      initializeApplication()
+      createWindow()
+
+      app.on('activate', () => {
+        if (!mainWindow) {
+          createWindow()
+        }
+      })
     })
-  })
+    .catch((error) => {
+      // 启动失败必须留下痕迹并退出，否则会留下一个没有窗口的僵尸进程。
+      console.error('Failed to start application:', error)
+      app.exit(1)
+    })
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {

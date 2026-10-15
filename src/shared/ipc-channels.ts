@@ -99,8 +99,8 @@ export const IPC_CHANNELS = {
   WINDOW_MOVE_BY: 'window:moveBy',
 
   /** 结束拖动当前窗口 */
-  WINDOW_DRAG_END: 'window:dragEnd',
-} as const;
+  WINDOW_DRAG_END: 'window:dragEnd'
+} as const
 
 /** Main -> Renderer 事件通道 */
 export const IPC_EVENTS = {
@@ -114,5 +114,5 @@ export const IPC_EVENTS = {
   STEALTH_SHORTCUT_FAILED: 'stealth:shortcutFailed',
 
   /** 自动保存失败 */
-  AUTOSAVE_FAILED: 'autosave:failed',
-} as const;
+  AUTOSAVE_FAILED: 'autosave:failed'
+} as const

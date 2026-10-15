@@ -651,9 +651,13 @@ export function ReaderView({
    *
    * 早期实现固定显示打开书籍时的 chapterContent.title，连续滚动到下一章后
    * 标题仍然停留在第一章，而章节计数已经变化，两者互相矛盾。
+   *
+   * 这里必须读 state（loadedChapterContents）而不是 ref（loadedChapterMap）：
+   * ref 的写入不会触发重渲染，在 render 期间读 ref 属于未定义行为，
+   * 一旦某个写入路径漏掉配套的 setState，标题就会静默停留在旧值。
    */
   const activeChapterTitle =
-    loadedChapterMap.current.get(currentChapterIndex)?.title ??
+    loadedChapterContents.find((chapter) => chapter.chapterIndex === currentChapterIndex)?.title ??
     (chapterContent?.chapterIndex === currentChapterIndex ? chapterContent.title : null) ??
     chapters[currentChapterIndex]?.title ??
     chapterContent?.title ??

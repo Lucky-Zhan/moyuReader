@@ -95,87 +95,87 @@ export function DisguiseTheme({
         </button>
       )}
     >
-        <div className="disguise-theme-menu-label">配色</div>
-        {THEME_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            className={`disguise-theme-btn ${theme === option.value ? 'active' : ''}`}
-            onClick={() => handleThemeSelect(option.value)}
-            aria-pressed={theme === option.value}
-            aria-label={`切换到${option.label}配色`}
-          >
-            {option.label}
-          </button>
-        ))}
-        <div className="disguise-theme-menu-separator" />
-        <label className="disguise-theme-toggle">
-          <input
-            type="checkbox"
-            checked={stealthEnabled}
-            onChange={(event) => onStealthEnabledChange(event.target.checked)}
-          />
-          <span>隐身模式</span>
-        </label>
-        <div className="disguise-theme-menu-separator" />
-        <div className="disguise-stealth-settings" aria-label="隐身行为设置">
-          <label className="disguise-setting-label" htmlFor="mouse-leave-action">
+      <div className="disguise-theme-menu-label">配色</div>
+      {THEME_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          className={`disguise-theme-btn ${theme === option.value ? 'active' : ''}`}
+          onClick={() => handleThemeSelect(option.value)}
+          aria-pressed={theme === option.value}
+          aria-label={`切换到${option.label}配色`}
+        >
+          {option.label}
+        </button>
+      ))}
+      <div className="disguise-theme-menu-separator" />
+      <label className="disguise-theme-toggle">
+        <input
+          type="checkbox"
+          checked={stealthEnabled}
+          onChange={(event) => onStealthEnabledChange(event.target.checked)}
+        />
+        <span>隐身模式</span>
+      </label>
+      <div className="disguise-theme-menu-separator" />
+      <div className="disguise-stealth-settings" aria-label="隐身行为设置">
+        <label className="disguise-setting-label" htmlFor="mouse-leave-action">
             鼠标移出行为
-          </label>
-          <select
-            id="mouse-leave-action"
-            className="disguise-setting-select"
-            value={mouseLeaveAction}
-            onChange={(event) =>
-              onMouseLeaveActionChange(event.target.value as MouseLeaveAction)
-            }
-            disabled={!stealthEnabled}
-            aria-label="鼠标移出行为"
-          >
-            <option value="hide">移出后隐藏</option>
-            <option value="deferred-quit">隐藏后延迟退出</option>
-            <option value="quit">移出后立即退出</option>
-          </select>
+        </label>
+        <select
+          id="mouse-leave-action"
+          className="disguise-setting-select"
+          value={mouseLeaveAction}
+          onChange={(event) =>
+            onMouseLeaveActionChange(event.target.value as MouseLeaveAction)
+          }
+          disabled={!stealthEnabled}
+          aria-label="鼠标移出行为"
+        >
+          <option value="hide">移出后隐藏</option>
+          <option value="deferred-quit">隐藏后延迟退出</option>
+          <option value="quit">移出后立即退出</option>
+        </select>
 
-          <label className="disguise-setting-label" htmlFor="mouse-leave-delay">
+        <label className="disguise-setting-label" htmlFor="mouse-leave-delay">
             移出延迟
-            <span className="disguise-setting-value">
-              {Math.round(mouseLeaveDelay / 1000)} 秒
-            </span>
-          </label>
-          <input
-            id="mouse-leave-delay"
-            className="disguise-setting-range"
-            type="range"
-            min={MOUSE_LEAVE_DELAY_MIN}
-            max={MOUSE_LEAVE_DELAY_MAX}
-            step={MOUSE_LEAVE_DELAY_STEP}
-            value={mouseLeaveDelay}
-            onChange={(event) => onMouseLeaveDelayChange(Number(event.target.value))}
-            disabled={!stealthEnabled || mouseLeaveAction === 'quit'}
-            aria-label="延迟秒数"
-          />
-          <label className="disguise-setting-label" htmlFor="mouse-return-delay">
+          <span className="disguise-setting-value">
+            {Math.round(mouseLeaveDelay / 1000)} 秒
+          </span>
+        </label>
+        <input
+          id="mouse-leave-delay"
+          className="disguise-setting-range"
+          type="range"
+          min={MOUSE_LEAVE_DELAY_MIN}
+          max={MOUSE_LEAVE_DELAY_MAX}
+          step={MOUSE_LEAVE_DELAY_STEP}
+          value={mouseLeaveDelay}
+          onChange={(event) => onMouseLeaveDelayChange(Number(event.target.value))}
+          disabled={!stealthEnabled || mouseLeaveAction === 'quit'}
+          aria-label="延迟秒数"
+        />
+        <label className="disguise-setting-label" htmlFor="mouse-return-delay">
             显形延迟
-            <span className="disguise-setting-value">
-              {Math.round(mouseReturnDelay / 1000)} 秒
-            </span>
-          </label>
-          <input
-            id="mouse-return-delay"
-            className="disguise-setting-range"
-            type="range"
-            min={MOUSE_RETURN_DELAY_MIN}
-            max={MOUSE_RETURN_DELAY_MAX}
-            step={MOUSE_RETURN_DELAY_STEP}
-            value={mouseReturnDelay}
-            onChange={(event) => onMouseReturnDelayChange(Number(event.target.value))}
-            disabled={!stealthEnabled || mouseLeaveAction === 'quit'}
-            aria-label="显形延迟秒数"
-          />
-          {mouseLeaveAction === 'quit' && (
-            <p className="disguise-setting-hint">立即退出已关闭延迟设置，请谨慎使用。</p>
-          )}
-        </div>
+          <span className="disguise-setting-value">
+            {Math.round(mouseReturnDelay / 1000)} 秒
+          </span>
+        </label>
+        <input
+          id="mouse-return-delay"
+          className="disguise-setting-range"
+          type="range"
+          min={MOUSE_RETURN_DELAY_MIN}
+          max={MOUSE_RETURN_DELAY_MAX}
+          step={MOUSE_RETURN_DELAY_STEP}
+          value={mouseReturnDelay}
+          onChange={(event) => onMouseReturnDelayChange(Number(event.target.value))}
+          disabled={!stealthEnabled || mouseLeaveAction === 'quit'}
+          aria-label="显形延迟秒数"
+        />
+        {mouseLeaveAction === 'quit' && (
+          <p className="disguise-setting-hint">立即退出已关闭延迟设置，请谨慎使用。</p>
+        )}
+      </div>
     </ReaderPopover>
   )
 }

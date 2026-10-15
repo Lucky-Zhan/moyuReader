@@ -293,7 +293,7 @@ describe('AutoSaveManager', () => {
     })
 
     it('should continue auto-save after failure if under retry limit', () => {
-      let shouldFail = true
+      const shouldFail = true
       const conditionalManager = {
         updateProgress: vi.fn().mockImplementation(() => {
           if (shouldFail) throw new Error('Save failed')

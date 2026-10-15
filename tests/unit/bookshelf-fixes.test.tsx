@@ -40,7 +40,7 @@ describe('verify bookshelf fixes', () => {
   })
 
   it('uses one getLibrary call instead of N getProgress calls', async () => {
-    const many = Array.from({length: 6}, (_, i) => book(String(i), `书${i}`))
+    const many = Array.from({ length: 6 }, (_, i) => book(String(i), `书${i}`))
     vi.mocked(api.bookshelf.getLibrary).mockResolvedValue(many.map(b => ({ book: b, progress: null })))
     render(<BookshelfView onOpenBook={vi.fn()} />)
     await screen.findByText('书0')

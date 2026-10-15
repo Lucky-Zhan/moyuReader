@@ -467,19 +467,25 @@ function App(): JSX.Element {
   useEffect(() => {
     let mounted = true
 
-    window.api.settings.get().then((settings) => {
-      if (!mounted || !settings) return
-      const appSettings: AppSettings = settings
-      setDisguiseTheme(appSettings.disguiseTheme)
-      setStealthEnabled(appSettings.stealthEnabled)
-      setMouseLeaveAction(appSettings.mouseLeaveAction)
-      setMouseLeaveDelay(appSettings.mouseLeaveDelay)
-      setMouseReturnDelay(appSettings.mouseReturnDelay ?? DEFAULT_MOUSE_RETURN_DELAY)
-      setFontSize(appSettings.fontSize)
-      setFontFamily(appSettings.fontFamily)
-      setLineHeight(appSettings.lineHeight)
-      void window.api.stealth.setDisguise(appSettings.disguiseTheme)
-    })
+    window.api.settings
+      .get()
+      .then((settings) => {
+        if (!mounted || !settings) return
+        const appSettings: AppSettings = settings
+        setDisguiseTheme(appSettings.disguiseTheme)
+        setStealthEnabled(appSettings.stealthEnabled)
+        setMouseLeaveAction(appSettings.mouseLeaveAction)
+        setMouseLeaveDelay(appSettings.mouseLeaveDelay)
+        setMouseReturnDelay(appSettings.mouseReturnDelay ?? DEFAULT_MOUSE_RETURN_DELAY)
+        setFontSize(appSettings.fontSize)
+        setFontFamily(appSettings.fontFamily)
+        setLineHeight(appSettings.lineHeight)
+        void window.api.stealth.setDisguise(appSettings.disguiseTheme)
+      })
+      .catch(() => {
+        // 读取设置失败时退回默认值即可，但必须捕获：否则会变成
+        // unhandled rejection，在 Electron 控制台打印红色堆栈、干扰排查。
+      })
 
     return () => {
       mounted = false
@@ -567,7 +573,9 @@ function App(): JSX.Element {
       <div className="app-drag-region" />
       {view === 'bookshelf' && <div className="app-topbar">{disguiseThemeControl}</div>}
 
-      {view === 'bookshelf' && <BookshelfView onOpenBook={handleOpenBook} />}
+      {view === 'bookshelf' && (
+        <BookshelfView onOpenBook={(bookId) => void handleOpenBook(bookId)} />
+      )}
 
       {view === 'reader' && (
         <div className="reader-layout">

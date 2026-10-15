@@ -3,7 +3,6 @@ import { SettingsManager } from '../../src/main/settings-manager'
 import {
   FONT_SIZE_MIN,
   FONT_SIZE_MAX,
-  FONT_SIZE_STEP,
   DEFAULT_FONT_SIZE,
   DEFAULT_FONT_FAMILY,
   AUTO_SAVE_INTERVAL,
@@ -20,7 +19,7 @@ import {
 
 /** 创建一个内存中的 mock store */
 function createMockStore() {
-  let data: Record<string, unknown> = {}
+  const data: Record<string, unknown> = {}
 
   return {
     get: (key: string, defaultValue?: unknown) => {

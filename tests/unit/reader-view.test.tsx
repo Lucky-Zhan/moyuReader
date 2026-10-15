@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ReaderView } from '../../src/renderer/src/components/ReaderView'
-import type { Chapter, ReadingProgress } from '../../src/shared/types'
+import type { Chapter, ChapterContent, ReadingProgress } from '../../src/shared/types'
 import { createMockApi } from './mock-api'
 import {
   DEFAULT_FONT_FAMILY,

@@ -60,7 +60,9 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
   }, [])
 
   useEffect(() => {
-    loadBooks()
+    // loadBooks 内部已有 try/catch/finally，这里显式 void 表明
+    // 「有意不等待」，避免被误认为漏了错误处理。
+    void loadBooks()
   }, [loadBooks])
 
   useEffect(() => {
@@ -72,9 +74,15 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
 
   /** 导入文件 */
   const handleImport = async (): Promise<void> => {
-    const success = await importFile()
-    if (success) {
-      await loadBooks()
+    try {
+      const success = await importFile()
+      if (success) {
+        await loadBooks()
+      }
+    } catch {
+      // 导入 IPC 失败时若不捕获，用户点了「导入小说」会毫无反应，
+      // 只在控制台留下 unhandled rejection。
+      showToast('导入失败，请重试')
     }
   }
   const handleBackupExport = async (): Promise<void> => {
@@ -91,12 +99,16 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
   }
 
   const handleBackupRestore = async (): Promise<void> => {
-    const result = await window.api.backup.restore()
-    if (result.success) {
-      showToast(`已恢复 ${result.importedBooks ?? 0} 本小说`)
-      await loadBooks()
-    } else if (result.error) {
-      showToast(`恢复失败：${result.error}`)
+    try {
+      const result = await window.api.backup.restore()
+      if (result.success) {
+        showToast(`已恢复 ${result.importedBooks ?? 0} 本小说`)
+        await loadBooks()
+      } else if (result.error) {
+        showToast(`恢复失败：${result.error}`)
+      }
+    } catch {
+      showToast('恢复失败，请重试')
     }
   }
 
@@ -180,7 +192,7 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
     if (e.target !== e.currentTarget) return
     if (e.key !== 'Enter' && e.key !== ' ') return
     e.preventDefault()
-    onOpenBook(bookId)
+    void onOpenBook(bookId)
   }
 
   const formatLastRead = (timestamp: number): string => {
@@ -248,7 +260,7 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
           </div>
         </div>
 
-        <button className="bookshelf-import-btn" onClick={handleImport} type="button">
+        <button className="bookshelf-import-btn" onClick={() => void handleImport()} type="button">
           <Icon name="plus" size={17} />
           导入小说
         </button>
@@ -272,7 +284,7 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
           <button
             className="bookshelf-sidebar-link"
             type="button"
-            onClick={handleBackupExport}
+            onClick={() => void handleBackupExport()}
           >
             <Icon name="archive" size={16} />
             导出备份
@@ -280,7 +292,7 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
           <button
             className="bookshelf-sidebar-link"
             type="button"
-            onClick={handleBackupRestore}
+            onClick={() => void handleBackupRestore()}
           >
             <Icon name="download" size={16} />
             从备份恢复
@@ -343,7 +355,7 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
               <div className="bookshelf-empty-mark" aria-hidden="true"><Icon name="library" size={27} /></div>
               <p>书架为空，请导入小说</p>
               <span className="bookshelf-empty-hint">把 TXT 拖进来，继续你的阅读</span>
-              <button className="bookshelf-import-btn" onClick={handleImport}>
+              <button className="bookshelf-import-btn" onClick={() => void handleImport()}>
                 <Icon name="plus" size={16} />
                 导入小说
               </button>
@@ -363,95 +375,95 @@ export default function BookshelfView({ onOpenBook }: BookshelfViewProps): JSX.E
                 <span />
               </div>
               <ul className={`bookshelf-list ${viewMode === 'grid' ? 'is-grid' : ''}`}>
-          {visibleBooks.map((book) => (
-            <li
-              key={book.id}
-              className="bookshelf-item"
-              onClick={() => onOpenBook(book.id)}
-              onKeyDown={(event) => handleBookKeyDown(event, book.id)}
-              tabIndex={0}
-              role="button"
-              aria-label={`打开《${book.title}》`}
-            >
-              <div className="bookshelf-item-identity">
-                <div className="bookshelf-item-mark" aria-hidden="true">
-                  {book.title.trim().charAt(0) || '书'}
-                </div>
-                <div className="bookshelf-item-info">
-                  {editingId === book.id ? (
-                    <input
-                      ref={editInputRef}
-                      className="bookshelf-edit-input"
-                      value={editValue}
-                      maxLength={MAX_TITLE_DISPLAY}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onKeyDown={handleEditKeyDown}
-                      onBlur={() => void saveEdit()}
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label="编辑书名"
-                    />
-                  ) : (
-                    <>
-                      <div className="bookshelf-item-title" title={book.title}>
-                        {truncateTitle(book.title)}
+                {visibleBooks.map((book) => (
+                  <li
+                    key={book.id}
+                    className="bookshelf-item"
+                    onClick={() => void onOpenBook(book.id)}
+                    onKeyDown={(event) => handleBookKeyDown(event, book.id)}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`打开《${book.title}》`}
+                  >
+                    <div className="bookshelf-item-identity">
+                      <div className="bookshelf-item-mark" aria-hidden="true">
+                        {book.title.trim().charAt(0) || '书'}
                       </div>
-                      <div className="bookshelf-item-author">
-                        {book.chapterCount > 0 ? `${book.chapterCount} 章` : '未解析章节'}
-                        <span className="bookshelf-item-dot" aria-hidden="true">·</span>
-                        {formatLastRead(book.lastReadAt)}
-                      </div>
-                      <div className="bookshelf-item-progress-row">
-                        <div className="bookshelf-item-progress-track" aria-hidden="true">
-                          <span
-                            style={{
-                              transform: `scaleX(${Math.max(0, Math.min(100, book.percentage)) / 100})`
-                            }}
+                      <div className="bookshelf-item-info">
+                        {editingId === book.id ? (
+                          <input
+                            ref={editInputRef}
+                            className="bookshelf-edit-input"
+                            value={editValue}
+                            maxLength={MAX_TITLE_DISPLAY}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={handleEditKeyDown}
+                            onBlur={() => void saveEdit()}
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="编辑书名"
                           />
-                        </div>
-                        <div className="bookshelf-item-progress">
+                        ) : (
+                          <>
+                            <div className="bookshelf-item-title" title={book.title}>
+                              {truncateTitle(book.title)}
+                            </div>
+                            <div className="bookshelf-item-author">
+                              {book.chapterCount > 0 ? `${book.chapterCount} 章` : '未解析章节'}
+                              <span className="bookshelf-item-dot" aria-hidden="true">·</span>
+                              {formatLastRead(book.lastReadAt)}
+                            </div>
+                            <div className="bookshelf-item-progress-row">
+                              <div className="bookshelf-item-progress-track" aria-hidden="true">
+                                <span
+                                  style={{
+                                    transform: `scaleX(${Math.max(0, Math.min(100, book.percentage)) / 100})`
+                                  }}
+                                />
+                              </div>
+                              <div className="bookshelf-item-progress">
                           进度：{book.percentage}%
-                        </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className="bookshelf-item-last-read">{formatLastRead(book.lastReadAt)}</div>
-              <div className="bookshelf-item-progress-column">
-                <div className="bookshelf-item-progress-track" aria-hidden="true">
-                  <span
-                    style={{
-                      transform: `scaleX(${Math.max(0, Math.min(100, book.percentage)) / 100})`
-                    }}
-                  />
-                </div>
-                <span>{book.percentage}%</span>
-              </div>
-              <div className="bookshelf-item-actions">
-                <button
-                  className="bookshelf-edit-btn"
-                  onClick={(e) => handleEditClick(e, book)}
-                  aria-label={`重命名《${book.title}》`}
-                  data-tooltip="重命名"
-                  data-tooltip-side="top"
-                  type="button"
-                >
-                  <Icon name="edit" size={15} />
-                </button>
-                <button
-                  className="bookshelf-delete-btn"
-                  onClick={(e) => handleDeleteClick(e, book.id)}
-                  aria-label={`删除《${book.title}》`}
-                  data-tooltip="删除"
-                  data-tooltip-side="top"
-                  type="button"
-                >
-                  <Icon name="trash" size={15} />
-                </button>
-              </div>
-            <span className="bookshelf-item-open-hint" aria-hidden="true">打开 <Icon name="arrow-up-right" size={13} /></span>
-            </li>
-          ))}
+                    </div>
+                    <div className="bookshelf-item-last-read">{formatLastRead(book.lastReadAt)}</div>
+                    <div className="bookshelf-item-progress-column">
+                      <div className="bookshelf-item-progress-track" aria-hidden="true">
+                        <span
+                          style={{
+                            transform: `scaleX(${Math.max(0, Math.min(100, book.percentage)) / 100})`
+                          }}
+                        />
+                      </div>
+                      <span>{book.percentage}%</span>
+                    </div>
+                    <div className="bookshelf-item-actions">
+                      <button
+                        className="bookshelf-edit-btn"
+                        onClick={(e) => handleEditClick(e, book)}
+                        aria-label={`重命名《${book.title}》`}
+                        data-tooltip="重命名"
+                        data-tooltip-side="top"
+                        type="button"
+                      >
+                        <Icon name="edit" size={15} />
+                      </button>
+                      <button
+                        className="bookshelf-delete-btn"
+                        onClick={(e) => handleDeleteClick(e, book.id)}
+                        aria-label={`删除《${book.title}》`}
+                        data-tooltip="删除"
+                        data-tooltip-side="top"
+                        type="button"
+                      >
+                        <Icon name="trash" size={15} />
+                      </button>
+                    </div>
+                    <span className="bookshelf-item-open-hint" aria-hidden="true">打开 <Icon name="arrow-up-right" size={13} /></span>
+                  </li>
+                ))}
               </ul>
             </>
           )}

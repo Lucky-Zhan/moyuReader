@@ -20,7 +20,7 @@ const BYTE_ORDER_MARK = '\uFEFF'
  * 并让「首行是否等于章节标题」这类比较莫名失败。这里在解码后统一剥掉。
  */
 function stripByteOrderMark(content: string): string {
-  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+  return content.charCodeAt(0) === BYTE_ORDER_MARK.charCodeAt(0) ? content.slice(1) : content
 }
 
 /**
@@ -123,9 +123,9 @@ export class FileImporter {
       encoding === 'utf-8'
         ? buffer.toString('utf-8')
         : // 用 gb18030 而不是 gbk 解码：GB18030 是 GBK 的超集，GBK 无法解码
-          // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
-          // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
-          iconv.decode(buffer, 'gb18030')
+      // GB18030 的 4 字节序列（生僻字、部分人名用字），会输出 U+FFFD 乱码。
+      // 对纯 GBK 内容两者结果一致，因此统一用 gb18030 更安全。
+        iconv.decode(buffer, 'gb18030')
 
     return stripByteOrderMark(content)
   }

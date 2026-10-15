@@ -38,7 +38,7 @@ function createMockStore(options?: {
   failOnSet?: (key: string, value: unknown) => boolean
   failSetCounts?: Record<string, number>
 }) {
-  let data: Record<string, unknown> = {
+  const data: Record<string, unknown> = {
     books: [],
     fileContents: {},
     progress: {},
