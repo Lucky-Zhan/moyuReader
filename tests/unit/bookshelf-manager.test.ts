@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { BookshelfManager } from '../../src/main/bookshelf-manager'
+import { ProgressStore } from '../../src/main/progress-store'
 import type { BookData, Chapter } from '../../src/shared/types'
 
 // Mock electron app module
@@ -12,27 +13,24 @@ vi.mock('electron', () => ({
 // Mock fs module
 const mockFiles: Record<string, string> = {}
 const mockUnlinkFailures = new Set<string>()
+const mockRenameFailures = new Set<string>()
 vi.mock('fs', () => {
-  return {
-    default: {
-      existsSync: (path: string) => path in mockFiles || path === '/tmp/test-app-data/books',
-      mkdirSync: vi.fn(),
-      writeFileSync: (path: string, content: string) => { mockFiles[path] = content },
-      readFileSync: (path: string) => mockFiles[path] ?? '',
-      unlinkSync: (path: string) => {
-        if (mockUnlinkFailures.has(path)) throw new Error(`Injected unlink failure for ${path}`)
-        delete mockFiles[path]
-      }
-    },
+  const fsMock = {
     existsSync: (path: string) => path in mockFiles || path === '/tmp/test-app-data/books',
     mkdirSync: vi.fn(),
     writeFileSync: (path: string, content: string) => { mockFiles[path] = content },
     readFileSync: (path: string) => mockFiles[path] ?? '',
+    renameSync: (from: string, to: string) => {
+      if (mockRenameFailures.has(from)) throw new Error(`Injected rename failure for ${from}`)
+      mockFiles[to] = mockFiles[from]
+      delete mockFiles[from]
+    },
     unlinkSync: (path: string) => {
       if (mockUnlinkFailures.has(path)) throw new Error(`Injected unlink failure for ${path}`)
       delete mockFiles[path]
     }
   }
+  return { default: fsMock, ...fsMock }
 })
 
 /** 创建一个内存中的 mock store */
@@ -44,7 +42,8 @@ function createMockStore(options?: {
     books: [],
     fileContents: {},
     progress: {},
-    bookmarks: {}
+    bookmarks: {},
+    lastReadAt: {}
   }
   const failSetCounts = { ...(options?.failSetCounts ?? {}) }
 
@@ -55,15 +54,25 @@ function createMockStore(options?: {
       // Return a deep copy to simulate real store behavior
       return JSON.parse(JSON.stringify(value))
     },
-    set: (key: string, value: unknown) => {
-      if ((failSetCounts[key] ?? 0) > 0) {
-        failSetCounts[key] -= 1
-        throw new Error(`Injected store failure for ${key}`)
+    set: (key: string | Record<string, unknown>, value?: unknown) => {
+      // 与 electron-store 一致：支持 set(key, value) 与 set({a, b}) 两种形式。
+      // 后者用于把多次写入合并成一次，避免整库反复序列化。
+      const entries: Array<[string, unknown]> =
+        typeof key === 'string' ? [[key, value]] : Object.entries(key)
+
+      for (const [entryKey, entryValue] of entries) {
+        if ((failSetCounts[entryKey] ?? 0) > 0) {
+          failSetCounts[entryKey] -= 1
+          throw new Error(`Injected store failure for ${entryKey}`)
+        }
+        if (options?.failOnSet?.(entryKey, entryValue)) {
+          throw new Error(`Injected store failure for ${entryKey}`)
+        }
       }
-      if (options?.failOnSet?.(key, value)) {
-        throw new Error(`Injected store failure for ${key}`)
+
+      for (const [entryKey, entryValue] of entries) {
+        data[entryKey] = JSON.parse(JSON.stringify(entryValue))
       }
-      data[key] = JSON.parse(JSON.stringify(value))
     },
     delete: (key: string) => {
       delete data[key]
@@ -96,6 +105,7 @@ describe('BookshelfManager', () => {
   beforeEach(() => {
     Object.keys(mockFiles).forEach((path) => delete mockFiles[path])
     mockUnlinkFailures.clear()
+    mockRenameFailures.clear()
     mockStore = createMockStore()
     manager = new BookshelfManager(mockStore)
   })
@@ -158,9 +168,6 @@ describe('BookshelfManager', () => {
       const storedBooks = mockStore.get('books', []) as any[]
       delete storedBooks[0].chapterParserVersion
       mockStore.set('books', storedBooks)
-      mockStore.set('progress', {
-        [meta.id]: { chapterIndex: 1, scrollPosition: 18, percentage: 20 }
-      })
       mockStore.set('bookmarks', {
         [meta.id]: [{
           id: 'bookmark-1',
@@ -174,14 +181,19 @@ describe('BookshelfManager', () => {
         }]
       })
 
-      const books = manager.getAllBooks()
+      // 进度存在独立文件里，用公开 API 写入后再新建管理器，
+      // 让它按「旧解析器版本」重新加载并触发章节重映射。
+      manager.updateProgress(meta.id, { chapterIndex: 1, scrollPosition: 18, percentage: 20 })
+      const reloaded = new BookshelfManager(mockStore)
+
+      const books = reloaded.getAllBooks()
       expect(books[0].chapters.map((chapter) => chapter.title)).toEqual([
         '第1章 开始',
         '第2章 继续',
         '第3章 结束'
       ])
       expect(books[0].chapterParserVersion).toBeDefined()
-      expect((mockStore.get('progress', {}) as any)[meta.id].chapterIndex).toBe(0)
+      expect(reloaded.getProgress(meta.id)?.chapterIndex).toBe(0)
       expect((mockStore.get('bookmarks', {}) as any)[meta.id][0].chapterIndex).toBe(1)
     })
   })
@@ -330,24 +342,22 @@ describe('BookshelfManager', () => {
       const chapters = createSampleChapters()
       const meta = manager.addBook(bookData, chapters)
 
-      // Manually set progress
-      const progress = mockStore.get('progress', {})
-      progress[meta.id] = { chapterIndex: 1, scrollPosition: 100, percentage: 50 }
-      mockStore.set('progress', progress)
+      manager.updateProgress(meta.id, { chapterIndex: 1, scrollPosition: 100, percentage: 50 })
+      expect(manager.getProgress(meta.id)).not.toBeNull()
 
       manager.removeBook(meta.id)
 
-      const updatedProgress = mockStore.get('progress', {})
-      expect(updatedProgress[meta.id]).toBeUndefined()
+      // 进度存在独立文件里，删除后应读不到。
+      expect(manager.getProgress(meta.id)).toBeNull()
     })
 
     it('should roll back small file deletion when a later store write fails', () => {
-      mockStore = createMockStore({ failSetCounts: { progress: 1 } })
+      mockStore = createMockStore({ failSetCounts: { bookmarks: 1 } })
       manager = new BookshelfManager(mockStore)
       const bookData = createSampleBookData({ fileSize: 1000 })
       const meta = manager.addBook(bookData, createSampleChapters())
 
-      expect(() => manager.removeBook(meta.id)).toThrow('Injected store failure for progress')
+      expect(() => manager.removeBook(meta.id)).toThrow('Injected store failure for bookmarks')
 
       expect(manager.getAllBooks()).toHaveLength(1)
       expect(manager.getBookContent(meta.id)).toBe(bookData.content)
@@ -425,6 +435,44 @@ describe('BookshelfManager', () => {
 
       const stored = manager.getProgress('non-existent-id')
       expect(stored).toBeNull()
+    })
+
+    it('should not write progress into electron-store', () => {
+      // 进度是滚动期间的高频写入，若落在 electron-store 里，每次 set 都会把
+      // 整个 store（含所有章节元数据）重新序列化，大书架上会造成秒级阻塞。
+      const meta = manager.addBook(createSampleBookData(), createSampleChapters())
+
+      manager.updateProgress(meta.id, { chapterIndex: 0, scrollPosition: 10, percentage: 5 })
+
+      expect(mockStore.get('progress', {})).toEqual({})
+      expect(mockStore.get('lastReadAt', {})).toEqual({})
+      expect(manager.getProgress(meta.id)).toEqual({
+        chapterIndex: 0,
+        scrollPosition: 10,
+        percentage: 5
+      })
+    })
+
+    it('should migrate legacy progress out of electron-store on startup', () => {
+      const meta = manager.addBook(createSampleBookData(), createSampleChapters())
+
+      // 模拟旧版本：进度与 lastReadAt 都写在 electron-store 里。
+      mockStore.set('progress', {
+        [meta.id]: { chapterIndex: 0, scrollPosition: 42, percentage: 30 }
+      })
+      mockStore.set('lastReadAt', { [meta.id]: 12345 })
+
+      const migrated = new BookshelfManager(mockStore)
+
+      expect(migrated.getProgress(meta.id)).toEqual({
+        chapterIndex: 0,
+        scrollPosition: 42,
+        percentage: 30
+      })
+      expect(migrated.getAllBooks()[0].lastReadAt).toBe(12345)
+      // 迁移后旧字段必须清空，否则仍会参与每次全量序列化。
+      expect(mockStore.get('progress', {})).toEqual({})
+      expect(mockStore.get('lastReadAt', {})).toEqual({})
     })
 
     it('should overwrite previous progress', () => {
@@ -531,11 +579,17 @@ describe('BookshelfManager', () => {
       const content = '第一章 开始\n正文'
       const chapters: Chapter[] = [{ title: '第一章 开始', offset: 0, length: content.length }]
       const meta = manager.addBook(createSampleBookData({ content, fileSize: 1000 }), chapters)
-      const progress = mockStore.get('progress', {})
-      progress[meta.id] = { chapterIndex: 99, scrollPosition: 10, percentage: 120 }
-      mockStore.set('progress', progress)
 
-      const result = manager.openBook(meta.id)
+      // 直接写进度文件：updateProgress 会拒绝越界值，而这里要模拟的正是
+      // 旧数据里残留的越界进度，用于验证 openBook 的兜底钳制。
+      const progressStore = new ProgressStore('/tmp/test-app-data')
+      progressStore.replace(
+        { [meta.id]: { chapterIndex: 99, scrollPosition: 10, percentage: 120 } },
+        { [meta.id]: 1 }
+      )
+      const reloaded = new BookshelfManager(mockStore)
+
+      const result = reloaded.openBook(meta.id)
 
       expect(result!.progress).toEqual({ chapterIndex: 0, scrollPosition: 10, percentage: 100 })
       expect(result!.chapterContent.chapterIndex).toBe(0)

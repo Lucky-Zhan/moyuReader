@@ -19,6 +19,7 @@ import type {
 import { MAX_TITLE_LENGTH } from '../shared/constants'
 import { findChapterIndexForOffset, getChapterType } from '../shared/chapter-patterns'
 import { ChapterParser, CHAPTER_PARSER_VERSION } from './chapter-parser'
+import { ProgressStore } from './progress-store'
 
 /**
  * 正文存储策略。
@@ -29,19 +30,21 @@ import { ChapterParser, CHAPTER_PARSER_VERSION } from './chapter-parser'
  * 现在正文一律存成独立文件，store 里只留元数据。
  */
 
-/** electron-store schema（只存元数据，不存正文） */
+/** electron-store schema（只存元数据，不存正文与进度） */
 interface StoreSchema {
   books: BookMeta[]
   /** 旧版本内联保存的正文；仅在迁移时读取，迁移后清空 */
   fileContents: Record<string, string>
+  /** 旧版本保存的阅读进度；仅在迁移时读取，迁移后清空 */
   progress: Record<string, ReadingProgress>
   bookmarks: Record<string, Bookmark[]>
+  /** 旧版本保存的最后阅读时间；仅在迁移时读取，迁移后清空 */
+  lastReadAt: Record<string, number>
 }
 
 interface StoreSnapshot {
   books: BookMeta[]
   fileContents: Record<string, string>
-  progress: Record<string, ReadingProgress>
   bookmarks: Record<string, Bookmark[]>
 }
 
@@ -63,17 +66,19 @@ interface HydratedBooksResult {
  */
 export class BookshelfManager {
   private store: Store<StoreSchema>
+  private progressStore: ProgressStore
   private booksDir: string
   private readonly chapterParser = new ChapterParser()
 
-  constructor(store?: Store<StoreSchema>) {
+  constructor(store?: Store<StoreSchema>, progressStore?: ProgressStore) {
     this.store = store ?? new Store<StoreSchema>({
       name: 'bookshelf',
       defaults: {
         books: [],
         fileContents: {},
         progress: {},
-        bookmarks: {}
+        bookmarks: {},
+        lastReadAt: {}
       }
     })
 
@@ -81,6 +86,42 @@ export class BookshelfManager {
     this.booksDir = join(app.getPath('userData'), 'books')
     if (!existsSync(this.booksDir)) {
       mkdirSync(this.booksDir, { recursive: true })
+    }
+
+    // 阅读进度独立成小文件：它写入频繁，而 electron-store 每次 set 都会
+    // 重写整个 store（含全部章节元数据），大书架上会造成秒级同步阻塞。
+    this.progressStore =
+      progressStore ?? new ProgressStore(app.getPath('userData'))
+    this.migrateLegacyProgress()
+  }
+
+  /**
+   * 把旧版本存在 electron-store 里的阅读进度迁移到独立文件。
+   *
+   * 只在旧数据存在时执行一次；迁移成功后清空 store 里的旧字段，
+   * 避免这部分数据继续参与每次全量序列化。
+   */
+  private migrateLegacyProgress(): void {
+    const legacyProgress = this.store.get('progress', {})
+    const legacyLastReadAt = this.store.get('lastReadAt', {})
+    const hasProgress = isRecord(legacyProgress) && Object.keys(legacyProgress).length > 0
+    const hasLastReadAt = isRecord(legacyLastReadAt) && Object.keys(legacyLastReadAt).length > 0
+
+    if (!hasProgress && !hasLastReadAt) return
+
+    // 旧数据里的 lastReadAt 也可能写在 books[i] 上，一并合并。
+    const merged: Record<string, number> = { ...(legacyLastReadAt as Record<string, number>) }
+    for (const book of this.store.get('books', [])) {
+      if (merged[book.id] === undefined && typeof book.lastReadAt === 'number') {
+        merged[book.id] = book.lastReadAt
+      }
+    }
+
+    try {
+      this.progressStore.replace(legacyProgress as Record<string, ReadingProgress>, merged)
+      this.store.set({ progress: {}, lastReadAt: {} })
+    } catch {
+      // 迁移失败时保留旧数据，下次启动再试。
     }
   }
 
@@ -92,7 +133,23 @@ export class BookshelfManager {
       this.store.set('books', hydratedBooks.books)
       this.migrateChapterReferences(hydratedBooks.migrations)
     }
-    return hydratedBooks.books
+    return this.applyLastReadAt(hydratedBooks.books)
+  }
+
+  /**
+   * 把 lastReadAt 合并回书籍元数据。
+   *
+   * lastReadAt 存在独立的小文件里（见 ProgressStore），这里读回来补上，
+   * 对调用方保持 BookMeta 形状不变；books 里遗留的旧值作为回退。
+   */
+  private applyLastReadAt(books: BookMeta[]): BookMeta[] {
+    const lastReadAt = this.progressStore.getAllLastReadAt()
+    if (Object.keys(lastReadAt).length === 0) return books
+
+    return books.map((book) => {
+      const stored = lastReadAt[book.id]
+      return typeof stored === 'number' ? { ...book, lastReadAt: stored } : book
+    })
   }
 
   /**
@@ -103,7 +160,7 @@ export class BookshelfManager {
    * 只走一次 IPC。
    */
   getLibrary(): LibraryItem[] {
-    const progress = this.store.get('progress', {})
+    const progress = this.progressStore.getAllProgress()
     return this.getAllBooks().map((book) => ({
       book,
       progress: progress[book.id] ?? null
@@ -155,15 +212,14 @@ export class BookshelfManager {
 
     const snapshot = this.createStoreSnapshot()
     const nextBooks = books.filter((b) => b.id !== bookId)
-    const progress = this.store.get('progress', {})
     const bookmarks = this.store.get('bookmarks', {})
-    delete progress[bookId]
     delete bookmarks[bookId]
 
     try {
-      this.store.set('progress', progress)
-      this.store.set('bookmarks', bookmarks)
-      this.store.set('books', nextBooks)
+      this.store.set({ bookmarks, books: nextBooks })
+      // 进度存在独立文件里，单独删除（失败不回滚元数据：残留的进度记录
+      // 只会让已删除的书在进度表里多占一条，不影响可读性）。
+      this.progressStore.remove(bookId)
 
       // 正文最后删除：若删除失败，可回滚元数据，避免书籍不可读。
       this.removeBookContentFile(bookId)
@@ -180,18 +236,15 @@ export class BookshelfManager {
     if (bookIndex === -1) return
     this.assertValidProgress(progress, books[bookIndex])
 
-    const allProgress = this.store.get('progress', {})
-    allProgress[bookId] = { ...progress }
-    this.store.set('progress', allProgress)
-
-    books[bookIndex].lastReadAt = Date.now()
-    this.store.set('books', books)
+    // 进度写在独立的小文件里，写入量与书架规模无关。
+    // 若放进 electron-store，每次 set 都要把整个 store（含所有章节元数据）
+    // 重新序列化并原子落盘，大书架上实测单次阻塞 700ms 以上。
+    this.progressStore.updateProgress(bookId, progress, Date.now())
   }
 
   /** 获取阅读进度 */
   getProgress(bookId: string): ReadingProgress | null {
-    const allProgress = this.store.get('progress', {})
-    return allProgress[bookId] ?? null
+    return this.progressStore.getProgress(bookId)
   }
 
   /** 打开书籍：返回元数据、阅读进度和当前章节正文 */
@@ -340,7 +393,7 @@ export class BookshelfManager {
         meta,
         content: this.getBookContent(meta.id) ?? ''
       })),
-      progress: this.store.get('progress', {}),
+      progress: this.progressStore.getAllProgress(),
       bookmarks: this.store.get('bookmarks', {})
     }
   }
@@ -350,6 +403,8 @@ export class BookshelfManager {
     this.assertBackup(backup)
     const snapshot = this.createStoreSnapshot()
     const previousBooks = snapshot.books
+    const previousProgress = this.progressStore.getAllProgress()
+    const previousLastReadAt = this.progressStore.getAllLastReadAt()
     // 快照只用于失败回滚。旧数据里可能残留不安全的 id，这里按“尽力备份”
     // 处理：读不到就记为需要清理，而不是让整个恢复流程直接失败。
     // 正文可能还在旧的内联 fileContents 里，因此走 readBookContent 而非只读文件。
@@ -371,13 +426,18 @@ export class BookshelfManager {
         this.writeBookContentFile(meta.id, content)
       }
 
-      this.store.set('books', backup.books.map((item) => item.meta))
-      this.store.set('fileContents', {})
-      this.store.set('progress', backup.progress)
-      this.store.set('bookmarks', backup.bookmarks)
+      this.store.set({
+        books: backup.books.map((item) => item.meta),
+        fileContents: {},
+        bookmarks: backup.bookmarks
+      })
+      // 进度写在独立文件里；lastReadAt 从备份的 meta 重建
+      // （更早的备份没有该字段时记 0）。
+      this.progressStore.replace(backup.progress, buildLastReadAtFromBackup(backup.books))
       return backup.books.length
     } catch (error) {
       this.restoreStoreSnapshot(snapshot)
+      this.progressStore.replace(previousProgress, previousLastReadAt)
       for (const { meta } of backup.books) {
         this.removeBookContentFileIfExists(meta.id)
       }
@@ -452,17 +512,17 @@ export class BookshelfManager {
     return {
       books: this.store.get('books', []),
       fileContents: this.store.get('fileContents', {}),
-      progress: this.store.get('progress', {}),
       bookmarks: this.store.get('bookmarks', {})
     }
   }
 
   private restoreStoreSnapshot(snapshot: StoreSnapshot): void {
     try {
-      this.store.set('books', snapshot.books)
-      this.store.set('fileContents', snapshot.fileContents)
-      this.store.set('progress', snapshot.progress)
-      this.store.set('bookmarks', snapshot.bookmarks)
+      this.store.set({
+        books: snapshot.books,
+        fileContents: snapshot.fileContents,
+        bookmarks: snapshot.bookmarks
+      })
     } catch {
       // 若底层存储自身不可写，保留原始异常给调用方。
     }
@@ -642,7 +702,7 @@ export class BookshelfManager {
   private migrateChapterReferences(migrations: ChapterMigration[]): void {
     if (migrations.length === 0) return
 
-    const progress = this.store.get('progress', {})
+    const progress = this.progressStore.getAllProgress()
     const bookmarks = this.store.get('bookmarks', {})
     let progressChanged = false
     let bookmarksChanged = false
@@ -677,7 +737,9 @@ export class BookshelfManager {
       }
     }
 
-    if (progressChanged) this.store.set('progress', progress)
+    if (progressChanged) {
+      this.progressStore.replace(progress, this.progressStore.getAllLastReadAt())
+    }
     if (bookmarksChanged) this.store.set('bookmarks', bookmarks)
   }
 
@@ -737,6 +799,22 @@ export class BookshelfManager {
     const title = rawLine.trim()
     return title.length > 0 ? title : null
   }
+}
+
+/**
+ * 从备份的书籍元数据里重建 lastReadAt 小表。
+ *
+ * createBackup 导出的 meta 已经带着 lastReadAt（getAllBooks 会合并小表），
+ * 因此恢复时直接取回来即可；更早的备份若没有该字段则记 0。
+ */
+function buildLastReadAtFromBackup(
+  books: Array<{ meta: BookMeta }>
+): Record<string, number> {
+  const result: Record<string, number> = {}
+  for (const { meta } of books) {
+    result[meta.id] = typeof meta.lastReadAt === 'number' ? meta.lastReadAt : 0
+  }
+  return result
 }
 
 /**
