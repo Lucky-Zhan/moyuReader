@@ -1,13 +1,14 @@
 .chapter-drawer-backdrop {
+  /* 只作为「点击空白处关闭」的命中区域，不再压暗正文。
+   * 抽屉改成把正文挤到右侧后，正文本身仍然完全可见，
+   * 再叠一层遮罩只会降低阅读区对比度。 */
   position: absolute;
   inset: 0;
   z-index: 45;
-  background: color-mix(in srgb, var(--surface-canvas, var(--app-bg)) 32%, transparent);
+  background: transparent;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--duration-sheet) var(--ease-apple-out);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
 }
 
 .chapter-drawer-backdrop.is-open {
@@ -16,32 +17,48 @@
 }
 
 .chapter-drawer {
-  position: absolute;
-  inset: 0 auto 0 0;
+  /* 目录抽屉是 .reader-layout（flex 行）的兄弟节点，靠 flex 占据宽度，
+   * 把正文挤到右侧，而不是浮在正文上面。
+   *
+   * 早期实现用 position: absolute 覆盖，实测在 900px 窗口下会盖住正文
+   * 108px、约 8 个段落，且正文不会重排——用户滚动时看不到被盖住的那几行。
+   * 阅读器里「目录」和「正文」是并列关系，不是浮层关系。
+   *
+   * 宽度用 0 <-> 336px 过渡：关闭时宽度归零，不占布局也不可点击。 */
+  position: relative;
   z-index: 46;
   display: flex;
-  width: min(336px, 86vw);
+  /* 抽屉在 DOM 里排在 .reader-main 之后（保持 Tab 顺序先正文后目录），
+   * 但视觉上必须靠左，因此用 order 把它提到前面。 */
+  order: -1;
+  width: 0;
+  flex: 0 0 auto;
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
   border: 0;
-  border-radius: 0 var(--control-radius-lg) var(--control-radius-lg) 0;
+  border-right: 1px solid color-mix(in srgb, var(--separator) 42%, transparent);
+  border-radius: 0;
   background: var(--material-popover);
-  box-shadow: 18px 0 52px color-mix(in srgb, var(--shadow) 70%, transparent);
   opacity: 0;
   pointer-events: none;
-  transform: translateX(-16px);
-  transition: opacity var(--duration-sheet) var(--ease-apple-out), transform var(--duration-sheet) var(--ease-apple-sheet);
+  transition: width var(--duration-sheet) var(--ease-apple-sheet),
+    opacity var(--duration-sheet) var(--ease-apple-out);
   backdrop-filter: blur(24px) saturate(145%);
   -webkit-backdrop-filter: blur(24px) saturate(145%);
-  will-change: transform, opacity;
   font-family: var(--font-ui);
 }
 
 .chapter-drawer.is-open {
+  width: min(336px, 86vw);
   opacity: 1;
   pointer-events: auto;
-  transform: translateX(0);
+}
+
+/* 抽屉内部内容固定宽度：宽度动画期间文字不应跟着被压缩换行。 */
+.chapter-drawer > * {
+  width: min(336px, 86vw);
+  flex-shrink: 0;
 }
 
 .chapter-drawer-header {
@@ -96,6 +113,13 @@
 
 .chapter-drawer .chapter-list {
   width: 100%;
+  /* 必须覆盖 ChapterList.css 里的 height: 100%。
+   * 抽屉是 flex 列，列表上方还有 72px 的抽屉头部；height: 100% 会让列表
+   * 按抽屉**总高**撑开，底部溢出 72px，滚动条轨道随之超出可视区，
+   * 表现为「滚动条和内容对不上、拖到底也看不到最后一章」。
+   * 改成 flex: 1 + min-height: 0，让它只占头部之外的剩余空间。 */
+  height: auto;
+  flex: 1 1 auto;
   min-height: 0;
   border: 0;
   background: transparent;

@@ -141,3 +141,72 @@ describe('提示气泡统一定义', () => {
     }
   })
 })
+
+describe('目录抽屉的滚动区域', () => {
+  const drawerCss = read('src/renderer/src/components/ChapterDrawer.css')
+  const chapterListCss = read('src/renderer/src/components/ChapterList.css')
+
+  /**
+   * 抽屉是 flex 列：头部 72px + 列表。ChapterList.css 给 .chapter-list 设了
+   * height: 100%，在抽屉里会让列表按**总高**撑开，底部溢出正好一个头部的高度，
+   * 滚动条轨道随之超出可视区——表现为滚动条和内容对不上、拖到底也看不全最后一章。
+   */
+  it('抽屉内的章节列表不能沿用 height: 100%', () => {
+    const rule = drawerCss.match(/\.chapter-drawer \.chapter-list \{[^}]*\}/)?.[0]
+    expect(rule, '缺少 .chapter-drawer .chapter-list 覆盖规则').toBeTruthy()
+    expect(rule).toMatch(/height:\s*auto/)
+    expect(rule).toMatch(/flex:\s*1/)
+    expect(rule).toMatch(/min-height:\s*0/)
+  })
+
+  it('基础样式仍保留 height: 100%（书架侧栏布局依赖它）', () => {
+    const rule = chapterListCss.match(/^\.chapter-list \{[^}]*\}/m)?.[0]
+    expect(rule).toBeTruthy()
+    expect(rule).toMatch(/height:\s*100%/)
+  })
+
+  it('列表自身可滚动且允许收缩', () => {
+    const rule = chapterListCss.match(/^\.chapter-list-items \{[^}]*\}/m)?.[0]
+    expect(rule).toBeTruthy()
+    expect(rule).toMatch(/overflow-y:\s*auto/)
+    expect(rule).toMatch(/flex:\s*1/)
+  })
+
+  /**
+   * 抽屉必须是「把正文挤到右侧」而不是「浮在正文上面」。
+   * 实测覆盖式布局在 900px 窗口下会盖住正文 108px、约 8 个段落，
+   * 且正文不重排，用户滚动时看不到被盖住的那几行。
+   */
+  it('抽屉靠 flex 占位而非绝对定位覆盖正文', () => {
+    // 先去掉注释：说明文字里会提到 position: absolute，不应被当成声明。
+    const rule = drawerCss
+      .match(/^\.chapter-drawer \{[^}]*\}/m)?.[0]
+      ?.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(rule).toBeTruthy()
+    expect(rule).toMatch(/position:\s*relative/)
+    expect(rule).not.toMatch(/position:\s*absolute/)
+    expect(rule).not.toMatch(/inset:/)
+    // 关闭时宽度归零，不占布局且不可点击。
+    expect(rule).toMatch(/width:\s*0/)
+    expect(rule).toMatch(/pointer-events:\s*none/)
+  })
+
+  it('抽屉打开时才展开宽度并恢复可点击', () => {
+    const rule = drawerCss.match(/\.chapter-drawer\.is-open \{[^}]*\}/)?.[0]
+    expect(rule).toBeTruthy()
+    expect(rule).toMatch(/width:\s*min\(336px, 86vw\)/)
+    expect(rule).toMatch(/pointer-events:\s*auto/)
+  })
+
+  it('抽屉在 DOM 中靠后但视觉上置左', () => {
+    const rule = drawerCss.match(/^\.chapter-drawer \{[^}]*\}/m)?.[0]
+    expect(rule).toMatch(/order:\s*-1/)
+  })
+
+  it('遮罩不再压暗正文', () => {
+    const rule = drawerCss.match(/^\.chapter-drawer-backdrop \{[^}]*\}/m)?.[0]
+    expect(rule).toBeTruthy()
+    expect(rule).toMatch(/background:\s*transparent/)
+    expect(rule).not.toMatch(/backdrop-filter/)
+  })
+})
